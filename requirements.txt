@@ -2,3 +2,4 @@ gradio
 llama-index
 openai
 pandas
+pydantic

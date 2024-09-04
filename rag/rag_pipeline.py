@@ -1,6 +1,7 @@
 # rag/rag_pipeline.py
 
 import json
+from typing import Dict, Any
 from llama_index.core import Document, VectorStoreIndex
 from llama_index.core.node_parser import SentenceWindowNodeParser, SentenceSplitter
 from llama_index.core import PromptTemplate
@@ -58,7 +59,9 @@ class RAGPipeline:
             nodes = node_parser.get_nodes_from_documents(self.documents)
             self.index = VectorStoreIndex(nodes)
 
-    def query(self, question, prompt_template=None):
+    def query(
+        self, question: str, prompt_template: PromptTemplate = None
+    ) -> Dict[str, Any]:
         self.build_index()  # This will only build the index if it hasn't been built yet
 
         if prompt_template is None:
@@ -79,4 +82,8 @@ class RAGPipeline:
         )
         response = query_engine.query(question)
 
-        return response
+        return {
+            "question": question,
+            "answer": response.response,
+            "sources": [node.metadata for node in response.source_nodes],
+        }
