@@ -3,8 +3,6 @@ import json
 from rag.rag_pipeline import RAGPipeline
 from utils.prompts import highlight_prompt, evidence_based_prompt
 from utils.prompts import (
-    study_characteristics_prompt,
-    vaccine_coverage_prompt,
     sample_questions,
 )
 from config import STUDY_FILES
@@ -33,10 +31,6 @@ def query_rag(study_name: str, question: str, prompt_type: str) -> str:
         prompt = highlight_prompt
     elif prompt_type == "Evidence-based":
         prompt = evidence_based_prompt
-    elif prompt_type == "Study Characteristics":
-        prompt = study_characteristics_prompt
-    elif prompt_type == "Vaccine Coverage":
-        prompt = vaccine_coverage_prompt
     else:
         prompt = None
 
@@ -112,8 +106,6 @@ with gr.Blocks() as demo:
             "Default",
             "Highlight",
             "Evidence-based",
-            "Study Characteristics",
-            "Vaccine Coverage",
         ],
         label="Prompt Type",
         value="Default",
