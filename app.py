@@ -28,6 +28,31 @@ def get_rag_pipeline(study_name):
 def query_rag(study_name, question, prompt_type):
     rag = get_rag_pipeline(study_name)
 
+    # Prepare a dictionary with all possible prompt parameters
+    prompt_params = {
+        "studyid": "",  # retrieve or generate a study ID?
+        "author": "",
+        "year": "",
+        "title": "",
+        "appendix": "",
+        "publication_type": "",
+        "study_design": "",
+        "study_area_region": "",
+        "study_population": "",
+        "immunisable_disease": "",
+        "route_of_administration": "",
+        "duration_of_study": "",
+        "duration_covid19": "",
+        "study_comments": "",
+        "coverage_rates": "",
+        "proportion_recommended_age": "",
+        "immunisation_uptake": "",
+        "drop_out_rates": "",
+        "intentions_to_vaccinate": "",
+        "vaccine_confidence": "",
+        "query_str": question,  # Add the question to the prompt parameters
+    }
+
     if prompt_type == "Highlight":
         prompt = highlight_prompt
     elif prompt_type == "Evidence-based":
@@ -39,7 +64,7 @@ def query_rag(study_name, question, prompt_type):
     else:
         prompt = None
 
-    response = rag.query(question, prompt)
+    response = rag.query(question, prompt, **prompt_params)
 
     # Format the response as Markdown
     formatted_response = f"## Question\n\n{response['question']}\n\n## Answer\n\n{response['answer']}\n\n## Sources\n\n"

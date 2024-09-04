@@ -60,7 +60,7 @@ class RAGPipeline:
             self.index = VectorStoreIndex(nodes)
 
     def query(
-        self, question: str, prompt_template: PromptTemplate = None
+        self, question: str, prompt_template: PromptTemplate = None, **kwargs
     ) -> Dict[str, Any]:
         self.build_index()  # This will only build the index if it hasn't been built yet
 
@@ -80,7 +80,8 @@ class RAGPipeline:
         query_engine = self.index.as_query_engine(
             text_qa_template=prompt_template, similarity_top_k=5
         )
-        response = query_engine.query(question)
+        # response = query_engine.query(question)
+        response = query_engine.query(question, **kwargs)
 
         return {
             "question": question,
