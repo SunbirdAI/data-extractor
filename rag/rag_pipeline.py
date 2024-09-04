@@ -4,6 +4,7 @@ import json
 from llama_index.core import Document, VectorStoreIndex
 from llama_index.core.node_parser import SentenceWindowNodeParser, SentenceSplitter
 from llama_index.core import PromptTemplate
+from typing import List
 
 
 class RAGPipeline:
