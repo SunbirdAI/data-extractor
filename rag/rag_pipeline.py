@@ -14,6 +14,8 @@ class RAGPipeline:
         self.use_semantic_splitter = use_semantic_splitter
         self.documents = None
         self.index = None
+        self.load_documents()
+        self.build_index()
 
     def load_documents(self):
         if self.documents is None:
@@ -40,6 +42,23 @@ class RAGPipeline:
                 self.documents.append(
                     Document(text=doc_content, id_=f"doc_{index}", metadata=metadata)
                 )
+
+    def build_index(self):
+        if self.index is None:
+            sentence_splitter = SentenceSplitter(chunk_size=128, chunk_overlap=13)
+
+            def _split(text: str) -> List[str]:
+                return sentence_splitter.split_text(text)
+
+            node_parser = SentenceWindowNodeParser.from_defaults(
+                sentence_splitter=_split,
+                window_size=3,
+                window_metadata_key="window",
+                original_text_metadata_key="original_text",
+            )
+
+            nodes = node_parser.get_nodes_from_documents(self.documents)
+            self.index = VectorStoreIndex(nodes)
 
     def extract_study_info(self) -> Dict[str, Any]:
         extraction_prompt = PromptTemplate(
@@ -74,29 +93,9 @@ class RAGPipeline:
 
         return extracted_info
 
-    def build_index(self):
-        if self.index is None:
-            self.load_documents()
-            sentence_splitter = SentenceSplitter(chunk_size=128, chunk_overlap=13)
-
-            def _split(text: str) -> List[str]:
-                return sentence_splitter.split_text(text)
-
-            node_parser = SentenceWindowNodeParser.from_defaults(
-                sentence_splitter=_split,
-                window_size=3,
-                window_metadata_key="window",
-                original_text_metadata_key="original_text",
-            )
-
-            nodes = node_parser.get_nodes_from_documents(self.documents)
-            self.index = VectorStoreIndex(nodes)
-
     def query(
         self, question: str, prompt_template: PromptTemplate = None, **kwargs
     ) -> Dict[str, Any]:
-        self.build_index()  # This will only build the index if it hasn't been built yet
-
         if prompt_template is None:
             prompt_template = PromptTemplate(
                 "Context information is below.\n"
@@ -113,6 +112,7 @@ class RAGPipeline:
         query_engine = self.index.as_query_engine(
             text_qa_template=prompt_template, similarity_top_k=5
         )
+
         # Use kwargs to pass additional parameters to the query
         response = query_engine.query(question, **kwargs)
 
