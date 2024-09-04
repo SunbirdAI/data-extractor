@@ -1,8 +1,16 @@
 import gradio as gr
+import os
 from database.vaccine_coverage_db import VaccineCoverageDB
 from rag.rag_pipeline import RAGPipeline
 from utils.helpers import process_response
 from config import DB_PATH, METADATA_FILE, PDF_DIR
+from initialize_db import initialize_database, populate_database
+
+# Initialize database if it doesn't exist
+if not os.path.exists(DB_PATH):
+    print("Database not found. Initializing...")
+    initialize_database()
+    populate_database()
 
 # Initialize database and RAG pipeline
 db = VaccineCoverageDB(DB_PATH)
@@ -23,7 +31,7 @@ def save_pdf(item_key):
     attachments = db.get_attachments_for_item(item_key)
     if attachments:
         attachment_key = attachments[0]["key"]
-        output_path = f"{attachment_key}.pdf"
+        output_path = os.path.join(PDF_DIR, f"{attachment_key}.pdf")
         if db.save_pdf_to_file(attachment_key, output_path):
             return f"PDF saved successfully to {output_path}"
     return "Failed to save PDF or no attachments found"

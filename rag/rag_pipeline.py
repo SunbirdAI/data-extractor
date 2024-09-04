@@ -25,6 +25,11 @@ class RAGPipeline:
         self.build_index()
 
     def load_documents(self):
+        if not os.path.exists(self.metadata_file):
+            print(f"Metadata file not found: {self.metadata_file}")
+            self.documents = []
+            return
+
         with open(self.metadata_file, "r") as f:
             self.metadata = json.load(f)
 
