@@ -2,4 +2,3 @@ gradio
 llama-index
 openai
 pandas
-sqlite3
