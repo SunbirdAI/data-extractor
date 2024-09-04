@@ -1,62 +1,72 @@
+# app.py
+
 import gradio as gr
-import os
-from database.vaccine_coverage_db import VaccineCoverageDB
+import json
 from rag.rag_pipeline import RAGPipeline
-from utils.helpers import process_response
-from config import DB_PATH, METADATA_FILE, PDF_DIR
-from initialize_db import initialize_database, populate_database
-
-# Initialize database if it doesn't exist
-if not os.path.exists(DB_PATH):
-    print("Database not found. Initializing...")
-    initialize_database()
-    populate_database()
-
-# Initialize database and RAG pipeline
-db = VaccineCoverageDB(DB_PATH)
-rag = RAGPipeline(METADATA_FILE, PDF_DIR, use_semantic_splitter=True)
+from utils.prompts import highlight_prompt, evidence_based_prompt
+from config import STUDY_FILES
 
 
-def query_rag(question, prompt_type):
-    if prompt_type == "Highlight":
-        response = rag.query(question, prompt_type="highlight")
+def load_rag_pipeline(study_name):
+    study_file = STUDY_FILES.get(study_name)
+    if study_file:
+        return RAGPipeline(study_file)
     else:
-        response = rag.query(question, prompt_type="evidence_based")
-
-    processed = process_response(response)
-    return processed["markdown"]
+        raise ValueError(f"Invalid study name: {study_name}")
 
 
-def save_pdf(item_key):
-    attachments = db.get_attachments_for_item(item_key)
-    if attachments:
-        attachment_key = attachments[0]["key"]
-        output_path = os.path.join(PDF_DIR, f"{attachment_key}.pdf")
-        if db.save_pdf_to_file(attachment_key, output_path):
-            return f"PDF saved successfully to {output_path}"
-    return "Failed to save PDF or no attachments found"
+def query_rag(study_name, question, prompt_type):
+    rag = load_rag_pipeline(study_name)
+
+    if prompt_type == "Highlight":
+        prompt = highlight_prompt
+    elif prompt_type == "Evidence-based":
+        prompt = evidence_based_prompt
+    else:
+        prompt = None
+
+    response = rag.query(question, prompt)
+    return response.response
 
 
-# Gradio interface
+def get_study_info(study_name):
+    study_file = STUDY_FILES.get(study_name)
+    if study_file:
+        with open(study_file, "r") as f:
+            data = json.load(f)
+        return f"Number of documents: {len(data)}\nFirst document title: {data[0]['title']}"
+    else:
+        return "Invalid study name"
+
+
 with gr.Blocks() as demo:
-    gr.Markdown("# Vaccine Coverage Study RAG System")
+    gr.Markdown("# RAG Pipeline Demo")
 
-    with gr.Tab("Query"):
+    with gr.Row():
+        study_dropdown = gr.Dropdown(
+            choices=list(STUDY_FILES.keys()), label="Select Study"
+        )
+        study_info = gr.Textbox(label="Study Information", interactive=False)
+
+    study_dropdown.change(get_study_info, inputs=[study_dropdown], outputs=[study_info])
+
+    with gr.Row():
         question_input = gr.Textbox(label="Enter your question")
-        prompt_type = gr.Radio(["Highlight", "Evidence-based"], label="Prompt Type")
-        query_button = gr.Button("Submit Query")
-        output = gr.Markdown(label="Response")
-
-        query_button.click(
-            query_rag, inputs=[question_input, prompt_type], outputs=output
+        prompt_type = gr.Radio(
+            ["Default", "Highlight", "Evidence-based"],
+            label="Prompt Type",
+            value="Default",
         )
 
-    with gr.Tab("Save PDF"):
-        item_key_input = gr.Textbox(label="Enter item key")
-        save_button = gr.Button("Save PDF")
-        save_output = gr.Textbox(label="Save Result")
+    submit_button = gr.Button("Submit")
 
-        save_button.click(save_pdf, inputs=item_key_input, outputs=save_output)
+    answer_output = gr.Textbox(label="Answer")
+
+    submit_button.click(
+        query_rag,
+        inputs=[study_dropdown, question_input, prompt_type],
+        outputs=[answer_output],
+    )
 
 if __name__ == "__main__":
     demo.launch()

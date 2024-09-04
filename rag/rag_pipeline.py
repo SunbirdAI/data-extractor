@@ -1,24 +1,13 @@
+# rag/rag_pipeline.py
+
 import json
-import os
-from typing import Dict, Any
-from llama_index.core import (
-    VectorStoreIndex,
-    Document,
-    SentenceWindowNodeParser,
-)
-from llama_index.core.node_parser import (
-    SentenceSplitter,
-)
+from llama_index.core import Document, VectorStoreIndex
+from llama_index.core.node_parser import SentenceWindowNodeParser, SentenceSplitter
 from llama_index.core import PromptTemplate
 
 
 class RAGPipeline:
-    def __init__(
-        self,
-        study_json,
-        use_semantic_splitter=False,
-    ):
-
+    def __init__(self, study_json, use_semantic_splitter=False):
         self.study_json = study_json
         self.index = None
         self.use_semantic_splitter = use_semantic_splitter
@@ -34,10 +23,7 @@ class RAGPipeline:
         for index, doc_data in enumerate(self.data):
             doc_content = (
                 f"Title: {doc_data['title']}\n"
-                f"Abstract: {doc_data['abstract']}\n"
                 f"Authors: {', '.join(doc_data['authors'])}\n"
-                f"Year: {doc_data['year']}\n"
-                f"DOI: {doc_data['doi']}\n"
                 f"Full Text: {doc_data['full_text']}"
             )
 
@@ -50,11 +36,7 @@ class RAGPipeline:
             }
 
             self.documents.append(
-                Document(
-                    text=doc_content,
-                    id_=f"doc_{index}",
-                    metadata=metadata,
-                )
+                Document(text=doc_content, id_=f"doc_{index}", metadata=metadata)
             )
 
     def build_index(self):
@@ -71,7 +53,6 @@ class RAGPipeline:
         )
 
         nodes = node_parser.get_nodes_from_documents(self.documents)
-
         self.index = VectorStoreIndex(nodes)
 
     def query(self, question, prompt_template=None):
@@ -89,8 +70,7 @@ class RAGPipeline:
             )
 
         query_engine = self.index.as_query_engine(
-            text_qa_template=prompt_template,
-            similarity_top_k=5,
+            text_qa_template=prompt_template, similarity_top_k=5
         )
         response = query_engine.query(question)
 
