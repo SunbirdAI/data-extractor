@@ -25,31 +25,15 @@ def get_rag_pipeline(study_name):
     return rag_cache[study_name]
 
 
-def query_rag(study_name, question, prompt_type):
+def query_rag(study_name: str, question: str, prompt_type: str) -> str:
     rag = get_rag_pipeline(study_name)
+
+    # Extract study information using RAG
+    study_info = rag.extract_study_info()
 
     # Prepare a dictionary with all possible prompt parameters
     prompt_params = {
-        "studyid": "",  # retrieve or generate a study ID?
-        "author": "",
-        "year": "",
-        "title": "",
-        "appendix": "",
-        "publication_type": "",
-        "study_design": "",
-        "study_area_region": "",
-        "study_population": "",
-        "immunisable_disease": "",
-        "route_of_administration": "",
-        "duration_of_study": "",
-        "duration_covid19": "",
-        "study_comments": "",
-        "coverage_rates": "",
-        "proportion_recommended_age": "",
-        "immunisation_uptake": "",
-        "drop_out_rates": "",
-        "intentions_to_vaccinate": "",
-        "vaccine_confidence": "",
+        **study_info,  # Unpack the extracted study info
         "query_str": question,  # Add the question to the prompt parameters
     }
 
@@ -64,12 +48,20 @@ def query_rag(study_name, question, prompt_type):
     else:
         prompt = None
 
+    # Use the prompt_params in the query
     response = rag.query(question, prompt, **prompt_params)
 
     # Format the response as Markdown
-    formatted_response = f"## Question\n\n{response['question']}\n\n## Answer\n\n{response['answer']}\n\n## Sources\n\n"
+    formatted_response = f"## Question\n\n{question}\n\n## Answer\n\n{response['answer']}\n\n## Sources\n\n"
     for source in response["sources"]:
-        formatted_response += f"- {source['title']} ({source['year']})\n"
+        formatted_response += (
+            f"- {source['title']} ({source.get('year', 'Year not specified')})\n"
+        )
+
+    # Add extracted study information to the response
+    formatted_response += "\n## Extracted Study Information\n\n"
+    for key, value in study_info.items():
+        formatted_response += f"- **{key.replace('_', ' ').title()}**: {value}\n"
 
     return formatted_response
 

@@ -41,6 +41,39 @@ class RAGPipeline:
                     Document(text=doc_content, id_=f"doc_{index}", metadata=metadata)
                 )
 
+    def extract_study_info(self) -> Dict[str, Any]:
+        extraction_prompt = PromptTemplate(
+            "Based on the given context, please extract the following information about the study:\n"
+            "1. Study ID\n"
+            "2. Author(s)\n"
+            "3. Year\n"
+            "4. Title\n"
+            "5. Study design\n"
+            "6. Study area/region\n"
+            "7. Study population\n"
+            "8. Disease under study\n"
+            "9. Duration of study\n"
+            "If the information is not available, please respond with 'Not found' for that field.\n"
+            "Context: {context_str}\n"
+            "Extracted information:"
+        )
+
+        query_engine = self.index.as_query_engine(
+            text_qa_template=extraction_prompt, similarity_top_k=5
+        )
+
+        response = query_engine.query("Extract study information")
+
+        # Parse the response to extract key-value pairs
+        lines = response.response.split("\n")
+        extracted_info = {}
+        for line in lines:
+            if ":" in line:
+                key, value = line.split(":", 1)
+                extracted_info[key.strip().lower().replace(" ", "_")] = value.strip()
+
+        return extracted_info
+
     def build_index(self):
         if self.index is None:
             self.load_documents()
@@ -80,7 +113,7 @@ class RAGPipeline:
         query_engine = self.index.as_query_engine(
             text_qa_template=prompt_template, similarity_top_k=5
         )
-        # response = query_engine.query(question)
+        # Use kwargs to pass additional parameters to the query
         response = query_engine.query(question, **kwargs)
 
         return {
