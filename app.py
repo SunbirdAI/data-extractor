@@ -2,7 +2,7 @@ import gradio as gr
 import json
 from rag.rag_pipeline import RAGPipeline
 from utils.prompts import highlight_prompt, evidence_based_prompt
-from utils.custom_prompts import (
+from utils.prompts import (
     study_characteristics_prompt,
     vaccine_coverage_prompt,
     sample_questions,
