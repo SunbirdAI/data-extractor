@@ -29,7 +29,11 @@ def query_rag(study_name, question, prompt_type):
         prompt = None
 
     response = rag.query(question, prompt)
-    return response.response
+    formatted_response = (
+        f"## Question\n\n{question}\n\n## Answer\n\n{response.response}"
+    )
+
+    return formatted_response
 
 
 def get_study_info(study_name):
@@ -37,7 +41,7 @@ def get_study_info(study_name):
     if study_file:
         with open(study_file, "r") as f:
             data = json.load(f)
-        return f"Number of documents: {len(data)}\nFirst document title: {data[0]['title']}"
+        return f"**Number of documents:** {len(data)}\n\n**First document title:** {data[0]['title']}"
     else:
         return "Invalid study name"
 
@@ -63,7 +67,8 @@ with gr.Blocks() as demo:
 
     submit_button = gr.Button("Submit")
 
-    answer_output = gr.Textbox(label="Answer")
+    # answer_output = gr.Textbox(label="Answer")
+    answer_output = gr.Markdown(label="Answer")
 
     submit_button.click(
         query_rag,
