@@ -1,5 +1,3 @@
-# app.py
-
 import gradio as gr
 import json
 from rag.rag_pipeline import RAGPipeline
@@ -31,12 +29,6 @@ def query_rag(study_name: str, question: str, prompt_type: str) -> str:
     # Extract study information using RAG
     study_info = rag.extract_study_info()
 
-    # Prepare a dictionary with all possible prompt parameters
-    prompt_params = {
-        **study_info,  # Unpack the extracted study info
-        "query_str": question,  # Add the question to the prompt parameters
-    }
-
     if prompt_type == "Highlight":
         prompt = highlight_prompt
     elif prompt_type == "Evidence-based":
@@ -48,8 +40,17 @@ def query_rag(study_name: str, question: str, prompt_type: str) -> str:
     else:
         prompt = None
 
-    # Use the prompt_params in the query
-    response = rag.query(question, prompt, **prompt_params)
+    # Prepare the context with study info
+    context = "Study Information:\n"
+    for key, value in study_info.items():
+        context += f"{key}: {value}\n"
+    context += "\n"
+
+    # Add the question to the context
+    context += f"Question: {question}\n"
+
+    # Use the prepared context in the query
+    response = rag.query(context, prompt_template=prompt)
 
     # Format the response as Markdown
     formatted_response = f"## Question\n\n{question}\n\n## Answer\n\n{response['answer']}\n\n## Sources\n\n"

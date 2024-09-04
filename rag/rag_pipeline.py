@@ -1,5 +1,3 @@
-# rag/rag_pipeline.py
-
 import json
 from typing import Dict, Any
 from llama_index.core import Document, VectorStoreIndex
@@ -94,7 +92,7 @@ class RAGPipeline:
         return extracted_info
 
     def query(
-        self, question: str, prompt_template: PromptTemplate = None, **kwargs
+        self, context: str, prompt_template: PromptTemplate = None
     ) -> Dict[str, Any]:
         if prompt_template is None:
             prompt_template = PromptTemplate(
@@ -102,7 +100,7 @@ class RAGPipeline:
                 "---------------------\n"
                 "{context_str}\n"
                 "---------------------\n"
-                "Given this information, please answer the question: {query_str}\n"
+                "Given this information, please answer the question provided in the context. "
                 "Include all relevant information from the provided context. "
                 "If information comes from multiple sources, please mention all of them. "
                 "If the information is not available in the context, please state that clearly. "
@@ -113,11 +111,9 @@ class RAGPipeline:
             text_qa_template=prompt_template, similarity_top_k=5
         )
 
-        # Use kwargs to pass additional parameters to the query
-        response = query_engine.query(question, **kwargs)
+        response = query_engine.query(context)
 
         return {
-            "question": question,
             "answer": response.response,
             "sources": [node.metadata for node in response.source_nodes],
         }
