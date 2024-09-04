@@ -1,6 +1,7 @@
 from typing import Dict, Any
 from llama_index.core import Response
 
+
 def process_response(response: Response) -> Dict[str, Any]:
     source_nodes = response.source_nodes
     sources = {}
@@ -18,12 +19,13 @@ def process_response(response: Response) -> Dict[str, Any]:
 
     return {"markdown": markdown_text, "raw": raw_text, "sources": sources}
 
-def format_source(metadata: Dict[str, Any]) -> str:
-    authors = metadata.get('authors', 'Unknown Author')
-    year = metadata.get('year', 'n.d.')
-    title = metadata.get('title', 'Untitled')
 
-    author_list = authors.split(',')
+def format_source(metadata: Dict[str, Any]) -> str:
+    authors = metadata.get("authors", "Unknown Author")
+    year = metadata.get("year", "n.d.")
+    title = metadata.get("title", "Untitled")
+
+    author_list = authors.split(",")
     if len(author_list) > 2:
         formatted_authors = f"{author_list[0].strip()} et al."
     elif len(author_list) == 2:
@@ -31,10 +33,10 @@ def format_source(metadata: Dict[str, Any]) -> str:
     else:
         formatted_authors = author_list[0].strip()
 
-    year = 'n.d.' if year is None or year == 'None' else str(year)
+    year = "n.d." if year is None or year == "None" else str(year)
 
     max_title_length = 250
     if len(title) > max_title_length:
-        title = title[:max_title_length] + '...'
+        title = title[:max_title_length] + "..."
 
     return f"{formatted_authors} ({year}). {title}"
