@@ -1,22 +1,25 @@
-# app.py
-
 import gradio as gr
 import json
 from rag.rag_pipeline import RAGPipeline
 from utils.prompts import highlight_prompt, evidence_based_prompt
 from config import STUDY_FILES
 
+# Cache for RAG pipelines
+rag_cache = {}
 
-def load_rag_pipeline(study_name):
-    study_file = STUDY_FILES.get(study_name)
-    if study_file:
-        return RAGPipeline(study_file)
-    else:
-        raise ValueError(f"Invalid study name: {study_name}")
+
+def get_rag_pipeline(study_name):
+    if study_name not in rag_cache:
+        study_file = STUDY_FILES.get(study_name)
+        if study_file:
+            rag_cache[study_name] = RAGPipeline(study_file)
+        else:
+            raise ValueError(f"Invalid study name: {study_name}")
+    return rag_cache[study_name]
 
 
 def query_rag(study_name, question, prompt_type):
-    rag = load_rag_pipeline(study_name)
+    rag = get_rag_pipeline(study_name)
 
     if prompt_type == "Highlight":
         prompt = highlight_prompt
