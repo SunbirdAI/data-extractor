@@ -1,3 +1,5 @@
+# app.py
+
 import gradio as gr
 import json
 from rag.rag_pipeline import RAGPipeline
@@ -9,6 +11,7 @@ from utils.prompts import (
 )
 from config import STUDY_FILES
 
+# Cache for RAG pipelines
 rag_cache = {}
 
 
@@ -57,7 +60,7 @@ def get_study_info(study_name):
 
 
 def update_sample_questions(study_name):
-    return gr.Dropdown.update(choices=sample_questions.get(study_name, []))
+    return gr.Dropdown(choices=sample_questions.get(study_name, []), interactive=True)
 
 
 with gr.Blocks() as demo:
@@ -73,7 +76,9 @@ with gr.Blocks() as demo:
 
     with gr.Row():
         question_input = gr.Textbox(label="Enter your question")
-        sample_question_dropdown = gr.Dropdown(choices=[], label="Sample Questions")
+        sample_question_dropdown = gr.Dropdown(
+            choices=[], label="Sample Questions", interactive=True
+        )
 
     study_dropdown.change(
         update_sample_questions,
@@ -107,4 +112,4 @@ with gr.Blocks() as demo:
     )
 
 if __name__ == "__main__":
-    demo.launch()
+    demo.launch(share=True)
