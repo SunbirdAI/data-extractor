@@ -1,36 +1,54 @@
 import gradio as gr
-import os
-from rag_pipeline import RAGPipeline
-import openai
-openai.api_key = os.environ.get('OPENAI_API_KEY')
+from database.vaccine_coverage_db import VaccineCoverageDB
+from rag.rag_pipeline import RAGPipeline
+from utils.helpers import process_response
+from config import DB_PATH, METADATA_FILE, PDF_DIR
 
-# Initialize the RAG pipeline
-rag = RAGPipeline("metadata_map.json", "pdfs")
+# Initialize database and RAG pipeline
+db = VaccineCoverageDB(DB_PATH)
+rag = RAGPipeline(METADATA_FILE, PDF_DIR, use_semantic_splitter=True)
 
-def process_query(question, response_format):
-    response = rag.query(question)
-    
-    if response_format == "Markdown":
-        return response["markdown"]
+
+def query_rag(question, prompt_type):
+    if prompt_type == "Highlight":
+        response = rag.query(question, prompt_type="highlight")
     else:
-        return response["raw"]
+        response = rag.query(question, prompt_type="evidence_based")
 
-# Define the Gradio interface
-iface = gr.Interface(
-    fn=process_query,
-    inputs=[
-        gr.Textbox(lines=2, placeholder="Enter your question here...", label="Question"),
-        gr.Radio(["Markdown", "Raw Text"], label="Response Format", value="Markdown")
-    ],
-    outputs=gr.Markdown(label="Response"),
-    title="Vaccine Coverage and Hesitancy Research QA",
-    description="Ask questions about vaccine coverage and hesitancy. The system will provide answers based on the available research papers.",
-    examples=[
-        ["What are the main factors contributing to vaccine hesitancy?", "Markdown"],
-        ["What are the current vaccine coverage rates in African countries?", "Raw Text"],
-    ],
-    allow_flagging="never"
-)
+    processed = process_response(response)
+    return processed["markdown"]
 
-# Launch the app
-iface.launch()
+
+def save_pdf(item_key):
+    attachments = db.get_attachments_for_item(item_key)
+    if attachments:
+        attachment_key = attachments[0]["key"]
+        output_path = f"{attachment_key}.pdf"
+        if db.save_pdf_to_file(attachment_key, output_path):
+            return f"PDF saved successfully to {output_path}"
+    return "Failed to save PDF or no attachments found"
+
+
+# Gradio interface
+with gr.Blocks() as demo:
+    gr.Markdown("# Vaccine Coverage Study RAG System")
+
+    with gr.Tab("Query"):
+        question_input = gr.Textbox(label="Enter your question")
+        prompt_type = gr.Radio(["Highlight", "Evidence-based"], label="Prompt Type")
+        query_button = gr.Button("Submit Query")
+        output = gr.Markdown(label="Response")
+
+        query_button.click(
+            query_rag, inputs=[question_input, prompt_type], outputs=output
+        )
+
+    with gr.Tab("Save PDF"):
+        item_key_input = gr.Textbox(label="Enter item key")
+        save_button = gr.Button("Save PDF")
+        save_output = gr.Textbox(label="Save Result")
+
+        save_button.click(save_pdf, inputs=item_key_input, outputs=save_output)
+
+if __name__ == "__main__":
+    demo.launch()
