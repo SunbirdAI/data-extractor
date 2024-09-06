@@ -27,8 +27,8 @@ class RAGPipeline:
             for index, doc_data in enumerate(self.data):
                 doc_content = (
                     f"Title: {doc_data['title']}\n"
+                    f"Abstract: {doc_data['abstract']}\n"
                     f"Authors: {', '.join(doc_data['authors'])}\n"
-                    f"Full Text: {doc_data['full_text']}"
                 )
 
                 metadata = {
@@ -37,6 +37,7 @@ class RAGPipeline:
                     "authors": doc_data.get("authors", []),
                     "year": doc_data.get("year"),
                     "doi": doc_data.get("doi"),
+                    "full_text": doc_data.get("full_text"),
                 }
 
                 self.documents.append(
@@ -89,7 +90,4 @@ class RAGPipeline:
 
         response = query_engine.query(context)
 
-        return {
-            "answer": response.response,
-            "sources": [node.metadata for node in response.source_nodes],
-        }
+        return response

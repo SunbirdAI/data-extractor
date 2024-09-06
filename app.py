@@ -35,14 +35,7 @@ def query_rag(study_name: str, question: str, prompt_type: str) -> str:
     # Use the prepared context in the query
     response = rag.query(question, prompt_template=prompt)
 
-    # Format the response as Markdown
-    formatted_response = f"## Question\n\n{question}\n\n## Answer\n\n{response['answer']}\n\n## Sources\n\n"
-    for source in response["sources"]:
-        formatted_response += (
-            f"- {source['title']} ({source.get('year', 'Year not specified')})\n"
-        )
-
-    return formatted_response
+    return response.response
 
 
 def get_study_info(study_name):
