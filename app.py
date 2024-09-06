@@ -1,11 +1,7 @@
 import gradio as gr
 import json
 from rag.rag_pipeline import RAGPipeline
-from utils.prompts import highlight_prompt, evidence_based_prompt
-from utils.prompts import (
-    sample_questions,
-)
-
+from utils.prompts import highlight_prompt, evidence_based_prompt, sample_questions
 from config import STUDY_FILES
 
 # Cache for RAG pipelines
@@ -22,7 +18,7 @@ def get_rag_pipeline(study_name):
     return rag_cache[study_name]
 
 
-def query_rag(study_name: str, question: str, prompt_type: str) -> str:
+def chat_function(message, history, study_name, prompt_type):
     rag = get_rag_pipeline(study_name)
 
     if prompt_type == "Highlight":
@@ -32,9 +28,7 @@ def query_rag(study_name: str, question: str, prompt_type: str) -> str:
     else:
         prompt = None
 
-    # Use the prepared context in the query
-    response = rag.query(question, prompt_template=prompt)
-
+    response = rag.query(message, prompt_template=prompt)
     return response.response
 
 
@@ -48,55 +42,48 @@ def get_study_info(study_name):
         return "Invalid study name"
 
 
-def update_sample_questions(study_name):
-    return gr.Dropdown(choices=sample_questions.get(study_name, []), interactive=True)
-
-
 with gr.Blocks() as demo:
     gr.Markdown("# RAG Pipeline Demo")
 
     with gr.Row():
         study_dropdown = gr.Dropdown(
-            choices=list(STUDY_FILES.keys()), label="Select Study"
+            choices=list(STUDY_FILES.keys()),
+            label="Select Study",
+            value=list(STUDY_FILES.keys())[0],
         )
-        study_info = gr.Markdown(label="Study Information")
-
-    study_dropdown.change(get_study_info, inputs=[study_dropdown], outputs=[study_info])
-
-    with gr.Row():
-        question_input = gr.Textbox(label="Enter your question")
-        sample_question_dropdown = gr.Dropdown(
-            choices=[], label="Sample Questions", interactive=True
-        )
-
-    study_dropdown.change(
-        update_sample_questions,
-        inputs=[study_dropdown],
-        outputs=[sample_question_dropdown],
-    )
-    sample_question_dropdown.change(
-        lambda x: x, inputs=[sample_question_dropdown], outputs=[question_input]
-    )
+        study_info = gr.Markdown()
 
     prompt_type = gr.Radio(
-        [
-            "Default",
-            "Highlight",
-            "Evidence-based",
-        ],
+        ["Default", "Highlight", "Evidence-based"],
         label="Prompt Type",
         value="Default",
     )
 
-    submit_button = gr.Button("Submit")
+    chatbot = gr.Chatbot()
+    msg = gr.Textbox()
+    clear = gr.Button("Clear")
 
-    answer_output = gr.Markdown(label="Answer")
+    def user(user_message, history):
+        return "", history + [[user_message, None]]
 
-    submit_button.click(
-        query_rag,
-        inputs=[study_dropdown, question_input, prompt_type],
-        outputs=[answer_output],
+    def bot(history, study_name, prompt_type):
+        user_message = history[-1][0]
+        bot_message = chat_function(user_message, history, study_name, prompt_type)
+        history[-1][1] = bot_message
+        return history
+
+    msg.submit(user, [msg, chatbot], [msg, chatbot], queue=False).then(
+        bot, [chatbot, study_dropdown, prompt_type], chatbot
     )
+    clear.click(lambda: None, None, chatbot, queue=False)
+
+    study_dropdown.change(
+        fn=get_study_info,
+        inputs=study_dropdown,
+        outputs=study_info,
+    ).then(lambda: None, None, chatbot, queue=False)
+
+    gr.Examples(examples=sample_questions[list(STUDY_FILES.keys())[0]], inputs=msg)
 
 if __name__ == "__main__":
     demo.launch(share=True, debug=True)
