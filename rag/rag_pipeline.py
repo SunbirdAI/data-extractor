@@ -37,7 +37,6 @@ class RAGPipeline:
                     "authors": doc_data.get("authors", []),
                     "year": doc_data.get("year"),
                     "doi": doc_data.get("doi"),
-                    "full_text": doc_data.get("full_text"),
                 }
 
                 self.documents.append(
