@@ -5,6 +5,7 @@ from utils.prompts import highlight_prompt, evidence_based_prompt
 from utils.prompts import (
     sample_questions,
 )
+
 from config import STUDY_FILES
 
 # Cache for RAG pipelines
@@ -24,9 +25,6 @@ def get_rag_pipeline(study_name):
 def query_rag(study_name: str, question: str, prompt_type: str) -> str:
     rag = get_rag_pipeline(study_name)
 
-    # Extract study information using RAG
-    study_info = rag.extract_study_info()
-
     if prompt_type == "Highlight":
         prompt = highlight_prompt
     elif prompt_type == "Evidence-based":
@@ -34,17 +32,8 @@ def query_rag(study_name: str, question: str, prompt_type: str) -> str:
     else:
         prompt = None
 
-    # Prepare the context with study info
-    context = "Study Information:\n"
-    for key, value in study_info.items():
-        context += f"{key}: {value}\n"
-    context += "\n"
-
-    # Add the question to the context
-    context += f"Question: {question}\n"
-
     # Use the prepared context in the query
-    response = rag.query(context, prompt_template=prompt)
+    response = rag.query(question, prompt_template=prompt)
 
     # Format the response as Markdown
     formatted_response = f"## Question\n\n{question}\n\n## Answer\n\n{response['answer']}\n\n## Sources\n\n"
@@ -52,11 +41,6 @@ def query_rag(study_name: str, question: str, prompt_type: str) -> str:
         formatted_response += (
             f"- {source['title']} ({source.get('year', 'Year not specified')})\n"
         )
-
-    # Add extracted study information to the response
-    formatted_response += "\n## Extracted Study Information\n\n"
-    for key, value in study_info.items():
-        formatted_response += f"- **{key.replace('_', ' ').title()}**: {value}\n"
 
     return formatted_response
 
@@ -122,4 +106,4 @@ with gr.Blocks() as demo:
     )
 
 if __name__ == "__main__":
-    demo.launch(share=True)
+    demo.launch(share=True, debug=True)

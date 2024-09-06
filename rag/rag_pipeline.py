@@ -4,6 +4,8 @@ from llama_index.core import Document, VectorStoreIndex
 from llama_index.core.node_parser import SentenceWindowNodeParser, SentenceSplitter
 from llama_index.core import PromptTemplate
 from typing import List
+from llama_index.embeddings.openai import OpenAIEmbedding
+from llama_index.llms.openai import OpenAI
 
 
 class RAGPipeline:
@@ -43,53 +45,22 @@ class RAGPipeline:
 
     def build_index(self):
         if self.index is None:
-            sentence_splitter = SentenceSplitter(chunk_size=128, chunk_overlap=13)
+            sentence_splitter = SentenceSplitter(chunk_size=2048, chunk_overlap=20)
 
             def _split(text: str) -> List[str]:
                 return sentence_splitter.split_text(text)
 
             node_parser = SentenceWindowNodeParser.from_defaults(
                 sentence_splitter=_split,
-                window_size=3,
+                window_size=5,
                 window_metadata_key="window",
                 original_text_metadata_key="original_text",
             )
 
             nodes = node_parser.get_nodes_from_documents(self.documents)
-            self.index = VectorStoreIndex(nodes)
-
-    def extract_study_info(self) -> Dict[str, Any]:
-        extraction_prompt = PromptTemplate(
-            "Based on the given context, please extract the following information about the study:\n"
-            "1. Study ID\n"
-            "2. Author(s)\n"
-            "3. Year\n"
-            "4. Title\n"
-            "5. Study design\n"
-            "6. Study area/region\n"
-            "7. Study population\n"
-            "8. Disease under study\n"
-            "9. Duration of study\n"
-            "If the information is not available, please respond with 'Not found' for that field.\n"
-            "Context: {context_str}\n"
-            "Extracted information:"
-        )
-
-        query_engine = self.index.as_query_engine(
-            text_qa_template=extraction_prompt, similarity_top_k=5
-        )
-
-        response = query_engine.query("Extract study information")
-
-        # Parse the response to extract key-value pairs
-        lines = response.response.split("\n")
-        extracted_info = {}
-        for line in lines:
-            if ":" in line:
-                key, value = line.split(":", 1)
-                extracted_info[key.strip().lower().replace(" ", "_")] = value.strip()
-
-        return extracted_info
+            self.index = VectorStoreIndex(
+                nodes, embed_model=OpenAIEmbedding(model_name="text-embedding-3-large")
+            )
 
     def query(
         self, context: str, prompt_template: PromptTemplate = None
@@ -107,8 +78,13 @@ class RAGPipeline:
                 "When quoting specific information, please use square brackets to indicate the source, e.g. [1], [2], etc."
             )
 
+        # This is a hack to index all the documents in the store :)
+        n_documents = len(self.index.docstore.docs)
         query_engine = self.index.as_query_engine(
-            text_qa_template=prompt_template, similarity_top_k=5
+            text_qa_template=prompt_template,
+            similarity_top_k=n_documents,
+            response_mode="tree_summarize",
+            llm=OpenAI(model="gpt-4o-mini"),
         )
 
         response = query_engine.query(context)
