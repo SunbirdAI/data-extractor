@@ -116,3 +116,20 @@ evidence_based_prompt = PromptTemplate(
     "If you're unsure about a source, use [?]. "
     "Ensure that EVERY statement from the context is properly cited."
 )
+
+
+structured_follow_up_prompt = PromptTemplate(
+    "Context information is below.\n"
+    "---------------------\n"
+    "{context_str}\n"
+    "---------------------\n"
+    "Original question: {query_str}\n"
+    "Response: {response_str}\n"
+    "Study type: {study_type}\n"
+    "Based on the above information and the study type, generate 3 follow-up questions that help extract key variables or information from the study. "
+    "Focus on the following aspects:\n"
+    "1. Any missing key variables that are typically reported in this type of study.\n"
+    "2. Clarification on methodology or results that might affect the interpretation of the study.\n"
+    "3. Potential implications or applications of the study findings.\n"
+    "Ensure each question is specific, relevant to the study type, and ends with a question mark."
+)
