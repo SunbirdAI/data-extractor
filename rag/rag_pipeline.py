@@ -70,11 +70,12 @@ class RAGPipeline:
                 "---------------------\n"
                 "{context_str}\n"
                 "---------------------\n"
-                "Given this information, please answer the question provided in the context. "
-                "Include all relevant information from the provided context. "
-                "If information comes from multiple sources, please mention all of them. "
-                "If the information is not available in the context, please state that clearly. "
-                "When quoting specific information, please use square brackets to indicate the source, e.g. [1], [2], etc."
+                "Given this information, please answer the question: {query_str}\n"
+                "Provide an answer to the question using evidence from the context above. "
+                "Cite sources using square brackets for EVERY piece of information, e.g. [1], [2], etc. "
+                "Even if there's only one source, still include the citation. "
+                "If you're unsure about a source, use [?]. "
+                "Ensure that EVERY statement from the context is properly cited."
             )
 
         # This is a hack to index all the documents in the store :)

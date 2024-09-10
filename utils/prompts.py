@@ -111,5 +111,8 @@ evidence_based_prompt = PromptTemplate(
     "---------------------\n"
     "Given this information, please answer the question: {query_str}\n"
     "Provide an answer to the question using evidence from the context above. "
-    "Cite sources using square brackets."
+    "Cite sources using square brackets for EVERY piece of information, e.g. [1], [2], etc. "
+    "Even if there's only one source, still include the citation. "
+    "If you're unsure about a source, use [?]. "
+    "Ensure that EVERY statement from the context is properly cited."
 )
