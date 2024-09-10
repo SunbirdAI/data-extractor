@@ -29,6 +29,7 @@ class RAGPipeline:
                     f"Title: {doc_data['title']}\n"
                     f"Abstract: {doc_data['abstract']}\n"
                     f"Authors: {', '.join(doc_data['authors'])}\n"
+                    # f"full_text: {doc_data['full_text']}"
                 )
 
                 metadata = {

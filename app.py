@@ -19,6 +19,9 @@ def get_rag_pipeline(study_name):
 
 
 def chat_function(message, history, study_name, prompt_type):
+    if not message.strip():
+        return "Please enter a valid query."
+
     rag = get_rag_pipeline(study_name)
     prompt = (
         highlight_prompt
@@ -34,30 +37,54 @@ def get_study_info(study_name):
     if study_file:
         with open(study_file, "r") as f:
             data = json.load(f)
-        return f"**Number of documents:** {len(data)}\n\n**First document title:** {data[0]['title']}"
+        return f"Number of documents: {len(data)}\nFirst document title: {data[0]['title']}"
     else:
         return "Invalid study name"
 
 
-with gr.Blocks(css="#chatbot {height: 600px; overflow-y: auto;}") as demo:
-    gr.Markdown("# RAG Pipeline Demo")
+def update_interface(study_name):
+    study_info = get_study_info(study_name)
+    questions = sample_questions.get(study_name, [])[:3]
+    return (
+        study_info,
+        *[gr.update(visible=True, value=q) for q in questions],
+        *[gr.update(visible=False) for _ in range(3 - len(questions))],
+    )
+
+
+def set_question(question):
+    return question
+
+
+with gr.Blocks() as demo:
+    gr.Markdown("# ACRES RAG Platform")
 
     with gr.Row():
-        with gr.Column(scale=3):
-            chatbot = gr.Chatbot(elem_id="chatbot")
+        with gr.Column(scale=2):
+            chatbot = gr.Chatbot(elem_id="chatbot", show_label=False, height=400)
             with gr.Row():
                 msg = gr.Textbox(
-                    show_label=False, placeholder="Enter your message here...", scale=4
+                    show_label=False,
+                    placeholder="Type your message here...",
+                    scale=4,
+                    lines=1,
+                    autofocus=True,
                 )
                 send_btn = gr.Button("Send", scale=1)
+            with gr.Accordion("Sample Questions", open=False):
+                sample_btn1 = gr.Button("Sample Question 1", visible=False)
+                sample_btn2 = gr.Button("Sample Question 2", visible=False)
+                sample_btn3 = gr.Button("Sample Question 3", visible=False)
 
         with gr.Column(scale=1):
+            gr.Markdown("### Study Information")
             study_dropdown = gr.Dropdown(
                 choices=list(STUDY_FILES.keys()),
                 label="Select Study",
                 value=list(STUDY_FILES.keys())[0],
             )
-            study_info = gr.Markdown()
+            study_info = gr.Textbox(label="Study Details", lines=4)
+            gr.Markdown("### Settings")
             prompt_type = gr.Radio(
                 ["Default", "Highlight", "Evidence-based"],
                 label="Prompt Type",
@@ -65,12 +92,14 @@ with gr.Blocks(css="#chatbot {height: 600px; overflow-y: auto;}") as demo:
             )
             clear = gr.Button("Clear Chat")
 
-    gr.Examples(examples=sample_questions[list(STUDY_FILES.keys())[0]], inputs=msg)
-
     def user(user_message, history):
+        if not user_message.strip():
+            return "", history  # Return unchanged if the message is empty
         return "", history + [[user_message, None]]
 
     def bot(history, study_name, prompt_type):
+        if not history:
+            return history
         user_message = history[-1][0]
         bot_message = chat_function(user_message, history, study_name, prompt_type)
         history[-1][1] = bot_message
@@ -85,10 +114,15 @@ with gr.Blocks(css="#chatbot {height: 600px; overflow-y: auto;}") as demo:
     clear.click(lambda: None, None, chatbot, queue=False)
 
     study_dropdown.change(
-        fn=get_study_info,
+        fn=update_interface,
         inputs=study_dropdown,
-        outputs=study_info,
+        outputs=[study_info, sample_btn1, sample_btn2, sample_btn3],
     )
+
+    sample_btn1.click(set_question, inputs=[sample_btn1], outputs=[msg])
+    sample_btn2.click(set_question, inputs=[sample_btn2], outputs=[msg])
+    sample_btn3.click(set_question, inputs=[sample_btn3], outputs=[msg])
+
 
 if __name__ == "__main__":
     demo.launch(share=True, debug=True)
