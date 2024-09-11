@@ -7,6 +7,94 @@ from utils.prompts import (
     VaccineCoverageVariables,
     StudyCharacteristics,
 )
+import json
+
+def read_study_files(file_path):
+    """
+    Reads a JSON file and returns the parsed JSON data.
+
+    Args:
+        file_path (str): The path to the JSON file to be read.
+
+    Returns:
+        dict: The data from the JSON file as a Python dictionary.
+
+    Raises:
+        FileNotFoundError: If the file is not found at the provided path.
+        json.JSONDecodeError: If the file contents are not valid JSON.
+        
+    Example:
+        Given a JSON file 'study_files.json' with content like:
+        {
+            "Vaccine Coverage": "data/vaccine_coverage_zotero_items.json",
+            "Ebola Virus": "data/ebola_virus_zotero_items.json",
+            "Gene Xpert": "data/gene_xpert_zotero_items.json"
+        }
+
+        Calling `read_json_file("study_files.json")` will return:
+        {
+            "Vaccine Coverage": "data/vaccine_coverage_zotero_items.json",
+            "Ebola Virus": "data/ebola_virus_zotero_items.json",
+            "Gene Xpert": "data/gene_xpert_zotero_items.json"
+        }
+    """
+    try:
+        with open(file_path, 'r') as file:
+            data = json.load(file)
+        return data
+    except FileNotFoundError as e:
+        raise FileNotFoundError(f"The file at path {file_path} was not found.") from e
+    except json.JSONDecodeError as e:
+        raise ValueError(f"The file at path {file_path} does not contain valid JSON.") from e
+
+
+def append_to_study_files(file_path, new_key, new_value):
+    """
+    Appends a new key-value entry to an existing JSON file.
+
+    Args:
+        file_path (str): The path to the JSON file.
+        new_key (str): The new key to add to the JSON file.
+        new_value (any): The value associated with the new key (can be any valid JSON data type).
+
+    Raises:
+        FileNotFoundError: If the file is not found at the provided path.
+        json.JSONDecodeError: If the file contents are not valid JSON.
+        IOError: If the file cannot be written.
+
+    Example:
+        If the file 'study_files.json' initially contains:
+        {
+            "Vaccine Coverage": "data/vaccine_coverage_zotero_items.json",
+            "Ebola Virus": "data/ebola_virus_zotero_items.json"
+        }
+
+        Calling `append_to_json_file("study_files.json", "Gene Xpert", "data/gene_xpert_zotero_items.json")`
+        will modify the file to:
+        {
+            "Vaccine Coverage": "data/vaccine_coverage_zotero_items.json",
+            "Ebola Virus": "data/ebola_virus_zotero_items.json",
+            "Gene Xpert": "data/gene_xpert_zotero_items.json"
+        }
+    """
+    try:
+        # Read the existing data from the file
+        with open(file_path, 'r') as file:
+            data = json.load(file)
+        
+        # Append the new key-value pair to the dictionary
+        data[new_key] = new_value
+
+        # Write the updated data back to the file
+        with open(file_path, 'w') as file:
+            json.dump(data, file, indent=4)  # indent for pretty printing
+
+    except FileNotFoundError as e:
+        raise FileNotFoundError(f"The file at path {file_path} was not found.") from e
+    except json.JSONDecodeError as e:
+        raise ValueError(f"The file at path {file_path} does not contain valid JSON.") from e
+    except IOError as e:
+        raise IOError(f"Failed to write to the file at {file_path}.") from e
 
 
 def generate_follow_up_questions(

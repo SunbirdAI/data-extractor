@@ -1,7 +1,11 @@
+chromadb==0.5.5
 fastapi==0.112.2
 gradio
 llama-index
+nest-asyncio==1.6.0
 openai
 pandas
 pydantic
 python-dotenv
+pyzotero
+python-slugify

@@ -1,11 +1,14 @@
 import json
 from typing import List, Tuple
+import os
 
 import gradio as gr
+from dotenv import load_dotenv
+from slugify import slugify
 
 from config import STUDY_FILES
 from rag.rag_pipeline import RAGPipeline
-from utils.helpers import generate_follow_up_questions
+from utils.helpers import generate_follow_up_questions, append_to_study_files
 from utils.prompts import (
     highlight_prompt,
     evidence_based_prompt,
@@ -14,11 +17,44 @@ from utils.prompts import (
 import openai
 
 from config import STUDY_FILES, OPENAI_API_KEY
+from utils.zotero_manager import ZoteroManager
+
+load_dotenv()
 
 openai.api_key = OPENAI_API_KEY
 
 # Cache for RAG pipelines
 rag_cache = {}
+
+zotero_library_id = os.getenv("ZOTERO_LIBRARY_ID")
+zotero_library_type = "user"  # or "group"
+zotero_api_access_key = os.getenv("ZOTERO_API_ACCESS_KEY")
+
+zotero_manager = ZoteroManager(
+    zotero_library_id, zotero_library_type, zotero_api_access_key
+)
+
+zotero_collections = zotero_manager.get_collections()
+zotero_collection_lists = zotero_manager.list_zotero_collections(zotero_collections)
+filtered_zotero_collection_lists = (
+    zotero_manager.filter_and_return_collections_with_items(zotero_collection_lists)
+)
+
+for collection in filtered_zotero_collection_lists:
+    collection_name = collection.get("name")
+    if collection_name not in STUDY_FILES:
+        collection_key = collection.get("key")
+        collection_items = zotero_manager.get_collection_items(collection_key)
+        zotero_collection_items = (
+            zotero_manager.get_collection_zotero_items_by_key(collection_key)
+        )
+        #### Export zotero collection items to json ####
+        zotero_items_json = zotero_manager.zotero_items_to_json(zotero_collection_items)
+        export_file = f"{slugify(collection_name)}_zotero_items.json"
+        zotero_manager.write_zotero_items_to_json_file(
+            zotero_items_json, f"data/{export_file}"
+        )
+        append_to_study_files("study_files.json", collection_name, f"data/{export_file}")
 
 
 def get_rag_pipeline(study_name: str) -> RAGPipeline:
@@ -66,6 +102,8 @@ def update_interface(study_name: str) -> Tuple[str, gr.update, gr.update, gr.upd
 
     study_info = get_study_info(study_name)
     questions = sample_questions.get(study_name, [])[:3]
+    if not questions:
+        questions = sample_questions.get("General", [])[:3]
     visible_questions = [gr.update(visible=True, value=q) for q in questions]
     hidden_questions = [gr.update(visible=False) for _ in range(3 - len(questions))]
     return (study_info, *visible_questions, *hidden_questions)

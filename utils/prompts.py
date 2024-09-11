@@ -71,7 +71,7 @@ vaccine_coverage_prompt = PromptTemplate(
 )
 
 sample_questions = {
-    "Vaccine Coverage": [
+    "Vaccine coverage": [
         "What are the vaccine coverage rates reported in the study?",
         "Are there any reported adverse events following immunization (AEFI)?",
         "How does the study account for different vaccine types or schedules?",
@@ -84,11 +84,16 @@ sample_questions = {
         "Were there any ethical considerations or challenges reported?",
         "Create a structured table for each Ebola virus study, including the following information: STUDYID, AUTHOR, YEAR, TITLE, PUBLICATION_TYPE, STUDY_DESIGN, STUDY_AREA_REGION, STUDY_POPULATION, SAMPLE_SIZE, PLASMA_TYPE, DOSAGE, FREQUENCY, SIDE_EFFECTS, VIRAL_LOAD_CHANGE, SURVIVAL_RATE, INCLUSION_CRITERIA, EXCLUSION_CRITERIA, SUBGROUP_ANALYSES, FOLLOW_UP_DURATION, LONG_TERM_OUTCOMES, DISEASE_SEVERITY_ASSESSMENT, BIOSAFETY_MEASURES, ETHICAL_CONSIDERATIONS, and STUDY_COMMENTS.",
     ],
-    "Gene Xpert": [
+    "GeneXpert": [
         "What is the main objective of the study?",
         "What is the study design?",
         "What disease condition is being studied?",
         "Extract and present in a tabular format the following variables for each Gene Xpert study: STUDYID, AUTHOR, YEAR, TITLE, PUBLICATION_TYPE, STUDY_DESIGN, STUDY_AREA_REGION, STUDY_POPULATION, DISEASE_CONDITION, OBJECTIVE, OUTCOME_MEASURES, SENSITIVITY, SPECIFICITY, COST_COMPARISON, TURNAROUND_TIME, IMPLEMENTATION_CHALLENGES, PERFORMANCE_VARIATIONS, QUALITY_CONTROL, EQUIPMENT_ISSUES, PATIENT_OUTCOME_IMPACT, TRAINING_REQUIREMENTS, SCALABILITY_CONSIDERATIONS, and STUDY_COMMENTS.",
+    ],
+    "General": [
+        "What is the main objective of the study?",
+        "What is the study design?",
+        "Extract and present in a tabular format the following variables for each study: STUDYID, AUTHOR, YEAR, TITLE, PUBLICATION_TYPE, STUDY_DESIGN, STUDY_AREA_REGION, STUDY_POPULATION, OBJECTIVE, and STUDY_COMMENTS.",
     ],
 }
 
