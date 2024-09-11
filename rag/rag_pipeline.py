@@ -35,7 +35,7 @@ class RAGPipeline:
                 metadata = {
                     "title": doc_data.get("title"),
                     "authors": doc_data.get("authors", []),
-                    "year": doc_data.get("year"),
+                    "year": doc_data.get("date"),
                     "doi": doc_data.get("doi"),
                 }
 

@@ -11,7 +11,13 @@ from utils.prompts import (
     evidence_based_prompt,
     sample_questions,
 )
+import openai
 
+from config import STUDY_FILES, OPENAI_API_KEY
+
+openai.api_key = OPENAI_API_KEY
+
+# Cache for RAG pipelines
 rag_cache = {}
 
 

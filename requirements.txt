@@ -4,3 +4,4 @@ llama-index
 openai
 pandas
 pydantic
+python-dotenv

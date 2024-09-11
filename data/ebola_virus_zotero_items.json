@@ -11,7 +11,7 @@
       "Marco Tuccori"
     ],
     "doi": "",
-    "year": null,
+    "date": "2020",
     "item_type": "journalArticle",
     "url": ""
   },
@@ -28,7 +28,7 @@
       "Sina Bavari"
     ],
     "doi": "10.1146/annurev-pharmtox-010716-105055",
-    "year": null,
+    "date": "2017-01-06",
     "item_type": "journalArticle",
     "url": "https://www.annualreviews.org/doi/10.1146/annurev-pharmtox-010716-105055"
   },
@@ -48,7 +48,7 @@
       "Xiangguo Qiu"
     ],
     "doi": "10.1016/j.molmed.2017.07.002",
-    "year": null,
+    "date": "09/2017",
     "item_type": "journalArticle",
     "url": "https://linkinghub.elsevier.com/retrieve/pii/S1471491417301090"
   },
@@ -66,7 +66,7 @@
       "Robert L. Gottlieb"
     ],
     "doi": "10.1038/s41577-021-00542-x",
-    "year": null,
+    "date": "06/2021",
     "item_type": "journalArticle",
     "url": "https://www.nature.com/articles/s41577-021-00542-x"
   },
@@ -85,7 +85,7 @@
       "M. P. Grobusch"
     ],
     "doi": "10.1080/13543784.2016.1240785",
-    "year": null,
+    "date": "2016-11-01",
     "item_type": "journalArticle",
     "url": "https://www.tandfonline.com/doi/full/10.1080/13543784.2016.1240785"
   },
@@ -99,7 +99,7 @@
       "Luciana Borio"
     ],
     "doi": "10.1128/microbiolspec.EI10-0014-2016",
-    "year": null,
+    "date": "2016-05-06",
     "item_type": "journalArticle",
     "url": "https://journals.asm.org/doi/10.1128/microbiolspec.EI10-0014-2016"
   },
@@ -117,7 +117,7 @@
       "Larry Zeitlin"
     ],
     "doi": "10.3233/HAB-150284",
-    "year": null,
+    "date": "2015-12-23",
     "item_type": "journalArticle",
     "url": "https://www.medra.org/servlet/aliasResolver?alias=iospress&doi=10.3233/HAB-150284"
   },
@@ -130,7 +130,7 @@
       "Olivier Garraud"
     ],
     "doi": "10.1016/j.transci.2016.12.014",
-    "year": null,
+    "date": "02/2017",
     "item_type": "journalArticle",
     "url": "https://linkinghub.elsevier.com/retrieve/pii/S1473050216302002"
   },
@@ -144,7 +144,7 @@
       "K Karunamoorthi"
     ],
     "doi": "",
-    "year": null,
+    "date": "",
     "item_type": "journalArticle",
     "url": ""
   },
@@ -162,7 +162,7 @@
       "Larry Zeitlin"
     ],
     "doi": "10.3233/HAB-150284",
-    "year": null,
+    "date": "2015-12-23",
     "item_type": "journalArticle",
     "url": ""
   },
@@ -176,7 +176,7 @@
       "Aaron A. R. Tobian"
     ],
     "doi": "10.1111/trf.12913",
-    "year": null,
+    "date": "2014-12",
     "item_type": "journalArticle",
     "url": ""
   },
@@ -194,7 +194,7 @@
       "Robert L. Gottlieb"
     ],
     "doi": "10.1038/s41577-021-00542-x",
-    "year": null,
+    "date": "2021-06",
     "item_type": "journalArticle",
     "url": ""
   },
@@ -210,7 +210,7 @@
       "Marco Tuccori"
     ],
     "doi": "10.1128/CMR.00072-20",
-    "year": null,
+    "date": "2020-09-16",
     "item_type": "journalArticle",
     "url": ""
   },
@@ -223,7 +223,7 @@
       "Olivier Garraud"
     ],
     "doi": "10.1016/j.transci.2016.12.014",
-    "year": null,
+    "date": "2017-02",
     "item_type": "journalArticle",
     "url": ""
   },
@@ -237,7 +237,7 @@
       "Luciana Borio"
     ],
     "doi": "10.1128/microbiolspec.EI10-0014-2016",
-    "year": null,
+    "date": "2016-06",
     "item_type": "journalArticle",
     "url": ""
   },
@@ -257,7 +257,7 @@
       "Xiangguo Qiu"
     ],
     "doi": "10.1016/j.molmed.2017.07.002",
-    "year": null,
+    "date": "2017-09",
     "item_type": "journalArticle",
     "url": ""
   },
@@ -274,7 +274,7 @@
       "Sina Bavari"
     ],
     "doi": "10.1146/annurev-pharmtox-010716-105055",
-    "year": null,
+    "date": "2017-01-06",
     "item_type": "journalArticle",
     "url": ""
   }
