@@ -26,35 +26,47 @@ openai.api_key = OPENAI_API_KEY
 # Cache for RAG pipelines
 rag_cache = {}
 
-zotero_library_id = os.getenv("ZOTERO_LIBRARY_ID")
-zotero_library_type = "user"  # or "group"
-zotero_api_access_key = os.getenv("ZOTERO_API_ACCESS_KEY")
+def process_zotero_library_items(zotero_library_id: str, zotero_api_access_key: str) -> str:
+    if not zotero_library_id or not zotero_api_access_key:
+        return "Please enter your zotero library Id and API Access Key"
 
-zotero_manager = ZoteroManager(
-    zotero_library_id, zotero_library_type, zotero_api_access_key
-)
+    zotero_library_id = zotero_library_id
+    zotero_library_type = "user"  # or "group"
+    zotero_api_access_key = zotero_api_access_key
 
-zotero_collections = zotero_manager.get_collections()
-zotero_collection_lists = zotero_manager.list_zotero_collections(zotero_collections)
-filtered_zotero_collection_lists = (
-    zotero_manager.filter_and_return_collections_with_items(zotero_collection_lists)
-)
+    message = ""
 
-for collection in filtered_zotero_collection_lists:
-    collection_name = collection.get("name")
-    if collection_name not in STUDY_FILES:
-        collection_key = collection.get("key")
-        collection_items = zotero_manager.get_collection_items(collection_key)
-        zotero_collection_items = (
-            zotero_manager.get_collection_zotero_items_by_key(collection_key)
+    try:
+        zotero_manager = ZoteroManager(
+            zotero_library_id, zotero_library_type, zotero_api_access_key
         )
-        #### Export zotero collection items to json ####
-        zotero_items_json = zotero_manager.zotero_items_to_json(zotero_collection_items)
-        export_file = f"{slugify(collection_name)}_zotero_items.json"
-        zotero_manager.write_zotero_items_to_json_file(
-            zotero_items_json, f"data/{export_file}"
+
+        zotero_collections = zotero_manager.get_collections()
+        zotero_collection_lists = zotero_manager.list_zotero_collections(zotero_collections)
+        filtered_zotero_collection_lists = (
+            zotero_manager.filter_and_return_collections_with_items(zotero_collection_lists)
         )
-        append_to_study_files("study_files.json", collection_name, f"data/{export_file}")
+
+        for collection in filtered_zotero_collection_lists:
+            collection_name = collection.get("name")
+            if collection_name not in STUDY_FILES:
+                collection_key = collection.get("key")
+                collection_items = zotero_manager.get_collection_items(collection_key)
+                zotero_collection_items = (
+                    zotero_manager.get_collection_zotero_items_by_key(collection_key)
+                )
+                #### Export zotero collection items to json ####
+                zotero_items_json = zotero_manager.zotero_items_to_json(zotero_collection_items)
+                export_file = f"{slugify(collection_name)}_zotero_items.json"
+                zotero_manager.write_zotero_items_to_json_file(
+                    zotero_items_json, f"data/{export_file}"
+                )
+                append_to_study_files("study_files.json", collection_name, f"data/{export_file}")
+        message = "Successfully processed items in your zotero library"
+    except Exception as e:
+        message = f"Error process your zotero library: {str(e)}"
+    
+    return message
 
 
 def get_rag_pipeline(study_name: str) -> RAGPipeline:
@@ -68,7 +80,7 @@ def get_rag_pipeline(study_name: str) -> RAGPipeline:
 
 
 def chat_function(
-    message: str, history: List[List[str]], study_name: str, prompt_type: str
+    message: str, study_name: str, prompt_type: str
 ) -> str:
     """Process a chat message and generate a response using the RAG pipeline."""
 
@@ -112,6 +124,13 @@ def update_interface(study_name: str) -> Tuple[str, gr.update, gr.update, gr.upd
 def set_question(question: str) -> str:
     return question.lstrip("✨ ")
 
+def process_multi_input(text, study_name, prompt_type):
+    # Split input based on commas and strip any extra spaces
+    variable_list = [word.strip().upper() for word in text.split(',')]
+    user_message =f"Extract and present in a tabular format the following variables for each {study_name} study: {', '.join(variable_list)}"
+    response = chat_function(user_message, study_name, prompt_type)
+    return response
+
 
 def create_gr_interface() -> gr.Blocks:
     """
@@ -130,29 +149,15 @@ def create_gr_interface() -> gr.Blocks:
 
     with gr.Blocks() as demo:
         gr.Markdown("# ACRES RAG Platform")
-
+        
         with gr.Row():
-            with gr.Column(scale=2):
-                chatbot = gr.Chatbot(
-                    elem_id="chatbot",
-                    show_label=False,
-                    height=600,
-                    container=False,
-                    show_copy_button=False,
-                    layout="bubble",
-                    visible=True,
-                )
-                with gr.Row():
-                    msg = gr.Textbox(
-                        show_label=False,
-                        placeholder="Type your message here...",
-                        scale=4,
-                        lines=1,
-                        autofocus=True,
-                    )
-                    send_btn = gr.Button("Send", scale=1)
-
             with gr.Column(scale=1):
+                gr.Markdown("### Zotero Credentials")
+                zotero_library_id = gr.Textbox(label="Zotero Library ID", type="password", placeholder="Enter Your Zotero Library ID here...")
+                zotero_api_access_key = gr.Textbox(label="Zotero API Access Key", type="password", placeholder="Enter Your Zotero API Access Key...")
+                process_zotero_btn = gr.Button("Process your Zotero Library")
+                zotero_output = gr.Markdown(label="Zotero")
+
                 gr.Markdown("### Study Information")
                 study_dropdown = gr.Dropdown(
                     choices=list(STUDY_FILES.keys()),
@@ -160,17 +165,6 @@ def create_gr_interface() -> gr.Blocks:
                     value=list(STUDY_FILES.keys())[0],
                 )
                 study_info = gr.Markdown(label="Study Details")
-                with gr.Accordion("Sample Questions", open=False):
-                    sample_btns = [
-                        gr.Button(f"Sample Question {i+1}", visible=False)
-                        for i in range(3)
-                    ]
-
-                gr.Markdown("### ✨ Generated Questions")
-                with gr.Row():
-                    follow_up_btns = [
-                        gr.Button(f"Follow-up {i+1}", visible=False) for i in range(3)
-                    ]
 
                 gr.Markdown("### Settings")
                 prompt_type = gr.Radio(
@@ -178,7 +172,20 @@ def create_gr_interface() -> gr.Blocks:
                     label="Prompt Type",
                     value="Default",
                 )
-                clear = gr.Button("Clear Chat")
+                # clear = gr.Button("Clear Chat")
+            
+            with gr.Column(scale=3):
+                gr.Markdown("### Study Variables")
+                with gr.Row():
+                    study_variables = gr.Textbox(
+                        show_label=False,
+                        placeholder="Type your variables separated by commas e.g (Study ID, Study Title, Authors etc)",
+                        scale=4,
+                        lines=1,
+                        autofocus=True,
+                    )
+                    submit_btn = gr.Button("Submit", scale=1)
+                answer_output = gr.Markdown(label="Answer")
 
         def user(
             user_message: str, history: List[List[str]]
@@ -189,7 +196,7 @@ def create_gr_interface() -> gr.Blocks:
 
         def bot(
             history: List[List[str]], study_name: str, prompt_type: str
-        ) -> Tuple[List[List[str]], gr.update, gr.update, gr.update]:
+        ) -> List[List[str]]:
             """
             Generate bot response and update the interface.
 
@@ -216,41 +223,31 @@ def create_gr_interface() -> gr.Blocks:
             bot_message = chat_function(user_message, history, study_name, prompt_type)
             history[-1][1] = bot_message
 
-            rag = get_rag_pipeline(study_name)
-            follow_up_questions = generate_follow_up_questions(
-                rag, bot_message, user_message, study_name
-            )
+            return history
 
-            visible_questions = [
-                gr.update(visible=True, value=q) for q in follow_up_questions
-            ]
-            hidden_questions = [
-                gr.update(visible=False) for _ in range(3 - len(follow_up_questions))
-            ]
+        # msg.submit(user, [msg, chatbot], [msg, chatbot], queue=False).then(
+        #     bot,
+        #     [chatbot, study_dropdown, prompt_type],
+        #     [chatbot, *follow_up_btns],
+        # )
+        # send_btn.click(user, [msg, chatbot], [msg, chatbot], queue=False).then(
+        #     bot,
+        #     [chatbot, study_dropdown, prompt_type],
+        #     [chatbot, *follow_up_btns],
+        # )
+        # for btn in follow_up_btns + sample_btns:
+        #     btn.click(set_question, inputs=[btn], outputs=[msg])
 
-            return (history, *visible_questions, *hidden_questions)
-
-        msg.submit(user, [msg, chatbot], [msg, chatbot], queue=False).then(
-            bot,
-            [chatbot, study_dropdown, prompt_type],
-            [chatbot, *follow_up_btns],
-        )
-        send_btn.click(user, [msg, chatbot], [msg, chatbot], queue=False).then(
-            bot,
-            [chatbot, study_dropdown, prompt_type],
-            [chatbot, *follow_up_btns],
-        )
-
-        for btn in follow_up_btns + sample_btns:
-            btn.click(set_question, inputs=[btn], outputs=[msg])
-
-        clear.click(lambda: None, None, chatbot, queue=False)
+        # clear.click(lambda: None, None, chatbot, queue=False)
 
         study_dropdown.change(
-            fn=update_interface,
+            fn=get_study_info,
             inputs=study_dropdown,
-            outputs=[study_info, *sample_btns],
+            outputs=[study_info],
         )
+
+        process_zotero_btn.click(process_zotero_library_items, inputs=[zotero_library_id, zotero_api_access_key], outputs=[zotero_output], queue=False)
+        submit_btn.click(process_multi_input, inputs=[study_variables, study_dropdown, prompt_type], outputs=[answer_output], queue=False)
 
     return demo
 
