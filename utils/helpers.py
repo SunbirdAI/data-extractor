@@ -8,6 +8,13 @@ from utils.prompts import (
     StudyCharacteristics,
 )
 import json
+import json
+import chromadb
+from chromadb.api.types import Document
+
+# Initialize ChromaDB client
+chromadb_client = chromadb.Client()
+
 
 def read_study_files(file_path):
     """
@@ -165,3 +172,47 @@ def generate_follow_up_questions(
         if cleaned_q:
             cleaned_questions.append(f"✨ {cleaned_q}")
     return cleaned_questions[:3]
+
+
+def add_study_files_to_chromadb(file_path: str, collection_name: str):
+    """
+    Reads the study files data from a JSON file and adds it to the specified ChromaDB collection.
+
+    :param file_path: Path to the JSON file containing study files data.
+    :param collection_name: Name of the ChromaDB collection to store the data.
+    """
+    # Load study files data from JSON file
+    try:
+        with open(file_path, "r") as f:
+            study_files_data = json.load(f)
+    except FileNotFoundError:
+        print(f"File '{file_path}' not found.")
+        return
+
+    # Get or create the collection in ChromaDB
+    collection = chromadb_client.get_or_create_collection(collection_name)
+
+    # Prepare lists for ids, texts, and metadata to batch insert
+    ids = []
+    documents = []
+    metadatas = []
+
+    # Populate lists with data from the JSON file
+    for name, file_path in study_files_data.items():
+        ids.append(name)  # Document ID
+        documents.append("")  # Optional text, can be left empty if not used
+        metadatas.append({"file_path": file_path})  # Metadata with file path
+
+    # Add documents to the collection in batch
+    collection.add(
+        ids=ids,
+        documents=documents,
+        metadatas=metadatas
+    )
+    
+    print("All study files have been successfully added to ChromaDB.")
+
+
+if __name__ == "__main__":
+    # Usage example
+    add_study_files_to_chromadb("study_files.json", "study_files_collection")

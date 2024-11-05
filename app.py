@@ -1,14 +1,14 @@
 import json
 from typing import List, Tuple
 import os
+import logging
 
 import gradio as gr
 from dotenv import load_dotenv
 from slugify import slugify
 
-from config import STUDY_FILES
 from rag.rag_pipeline import RAGPipeline
-from utils.helpers import generate_follow_up_questions, append_to_study_files
+from utils.helpers import generate_follow_up_questions, append_to_study_files, add_study_files_to_chromadb, chromadb_client
 from utils.prompts import (
     highlight_prompt,
     evidence_based_prompt,
@@ -20,8 +20,12 @@ from config import STUDY_FILES, OPENAI_API_KEY
 from utils.zotero_manager import ZoteroManager
 
 load_dotenv()
+logging.basicConfig(level=logging.INFO)
 
 openai.api_key = OPENAI_API_KEY
+
+# After loop, add all collected data to ChromaDB
+add_study_files_to_chromadb("study_files.json", "study_files_collection")
 
 # Cache for RAG pipelines
 rag_cache = {}
@@ -47,6 +51,8 @@ def process_zotero_library_items(zotero_library_id: str, zotero_api_access_key: 
             zotero_manager.filter_and_return_collections_with_items(zotero_collection_lists)
         )
 
+        study_files_data = {}  # Dictionary to collect items for ChromaDB
+
         for collection in filtered_zotero_collection_lists:
             collection_name = collection.get("name")
             if collection_name not in STUDY_FILES:
@@ -62,6 +68,16 @@ def process_zotero_library_items(zotero_library_id: str, zotero_api_access_key: 
                     zotero_items_json, f"data/{export_file}"
                 )
                 append_to_study_files("study_files.json", collection_name, f"data/{export_file}")
+
+                # Collect for ChromaDB
+                study_files_data[collection_name] = f"data/{export_file}"
+
+                # Update in-memory STUDY_FILES for reference in current session
+                STUDY_FILES.update({collection_name: f"data/{export_file}"})
+                logging.info(f"STUDY_FILES: {STUDY_FILES}")
+        
+        # After loop, add all collected data to ChromaDB
+        add_study_files_to_chromadb("study_files.json", "study_files_collection")
         message = "Successfully processed items in your zotero library"
     except Exception as e:
         message = f"Error process your zotero library: {str(e)}"
@@ -70,12 +86,24 @@ def process_zotero_library_items(zotero_library_id: str, zotero_api_access_key: 
 
 
 def get_rag_pipeline(study_name: str) -> RAGPipeline:
-    """Get or create a RAGPipeline instance for the given study."""
+    """Get or create a RAGPipeline instance for the given study by querying ChromaDB."""
     if study_name not in rag_cache:
-        study_file = STUDY_FILES.get(study_name)
-        if not study_file:
+        # Query ChromaDB for the study file path by ID
+        collection = chromadb_client.get_or_create_collection("study_files_collection")
+        result = collection.get(ids=[study_name])  # Retrieve document by ID
+
+        # Check if the result contains the requested document
+        if not result or len(result['metadatas']) == 0:
             raise ValueError(f"Invalid study name: {study_name}")
+
+        # Extract the file path from the document metadata
+        study_file = result['metadatas'][0].get("file_path")
+        if not study_file:
+            raise ValueError(f"File path not found for study name: {study_name}")
+
+        # Create and cache the RAGPipeline instance
         rag_cache[study_name] = RAGPipeline(study_file)
+
     return rag_cache[study_name]
 
 
@@ -88,6 +116,7 @@ def chat_function(
         return "Please enter a valid query."
 
     rag = get_rag_pipeline(study_name)
+    logging.info(f"rag: ==> {rag}")
     prompt = {
         "Highlight": highlight_prompt,
         "Evidence-based": evidence_based_prompt,
@@ -100,9 +129,19 @@ def chat_function(
 def get_study_info(study_name: str) -> str:
     """Retrieve information about the specified study."""
 
-    study_file = STUDY_FILES.get(study_name)
+    collection = chromadb_client.get_or_create_collection("study_files_collection")
+    result = collection.get(ids=[study_name])  # Query by study name (as a list)
+    logging.info(f"Result: ======> {result}")
+
+    # Check if the document exists in the result
+    if not result or len(result['metadatas']) == 0:
+        raise ValueError(f"Invalid study name: {study_name}")
+
+    # Extract the file path from the document metadata
+    study_file = result['metadatas'][0].get("file_path")
+    logging.info(f"study_file: =======> {study_file}")
     if not study_file:
-        return "Invalid study name"
+        raise ValueError(f"File path not found for study name: {study_name}")
 
     with open(study_file, "r") as f:
         data = json.load(f)
@@ -128,6 +167,7 @@ def process_multi_input(text, study_name, prompt_type):
     # Split input based on commas and strip any extra spaces
     variable_list = [word.strip().upper() for word in text.split(',')]
     user_message =f"Extract and present in a tabular format the following variables for each {study_name} study: {', '.join(variable_list)}"
+    logging.info(f"User message: ==> {user_message}")
     response = chat_function(user_message, study_name, prompt_type)
     return response
 
@@ -159,11 +199,24 @@ def create_gr_interface() -> gr.Blocks:
                 zotero_output = gr.Markdown(label="Zotero")
 
                 gr.Markdown("### Study Information")
+
+                # Query ChromaDB for all document IDs in the "study_files_collection" collection
+                collection = chromadb_client.get_or_create_collection("study_files_collection")
+                # Retrieve all documents by querying with an empty string and specifying a high n_results
+                all_documents = collection.query(query_texts=[""], n_results=1000)
+                logging.info(f"all_documents: =========> {all_documents}")
+                # Extract document IDs as study names
+                document_ids = all_documents.get("ids")
+                study_choices = [doc_id for doc_id in document_ids[0] if document_ids]  # Get list of document IDs
+                logging.info(f"study_choices: ======> {study_choices}")
+
+                # Update the Dropdown with choices from ChromaDB
                 study_dropdown = gr.Dropdown(
-                    choices=list(STUDY_FILES.keys()),
+                    choices=study_choices,
                     label="Select Study",
-                    value=list(STUDY_FILES.keys())[0],
+                    value=study_choices[0] if study_choices else None,  # Set first choice as default, if available
                 )
+
                 study_info = gr.Markdown(label="Study Details")
 
                 gr.Markdown("### Settings")
