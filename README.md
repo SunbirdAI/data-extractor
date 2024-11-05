@@ -1,5 +1,5 @@
 ---
-title: Acres
+title: 'ACRES: Center For Rapid Evidence Synthesis'
 emoji: 👁
 colorFrom: gray
 colorTo: pink
