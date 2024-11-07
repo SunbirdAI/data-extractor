@@ -1,3 +1,5 @@
+# utils/helpers.py
+
 from typing import Dict, Any
 from llama_index.core import Response
 from typing import List
@@ -29,7 +31,7 @@ def read_study_files(file_path):
     Raises:
         FileNotFoundError: If the file is not found at the provided path.
         json.JSONDecodeError: If the file contents are not valid JSON.
-        
+
     Example:
         Given a JSON file 'study_files.json' with content like:
         {
@@ -46,13 +48,15 @@ def read_study_files(file_path):
         }
     """
     try:
-        with open(file_path, 'r') as file:
+        with open(file_path, "r") as file:
             data = json.load(file)
         return data
     except FileNotFoundError as e:
         raise FileNotFoundError(f"The file at path {file_path} was not found.") from e
     except json.JSONDecodeError as e:
-        raise ValueError(f"The file at path {file_path} does not contain valid JSON.") from e
+        raise ValueError(
+            f"The file at path {file_path} does not contain valid JSON."
+        ) from e
 
 
 def append_to_study_files(file_path, new_key, new_value):
@@ -86,20 +90,22 @@ def append_to_study_files(file_path, new_key, new_value):
     """
     try:
         # Read the existing data from the file
-        with open(file_path, 'r') as file:
+        with open(file_path, "r") as file:
             data = json.load(file)
-        
+
         # Append the new key-value pair to the dictionary
         data[new_key] = new_value
 
         # Write the updated data back to the file
-        with open(file_path, 'w') as file:
+        with open(file_path, "w") as file:
             json.dump(data, file, indent=4)  # indent for pretty printing
 
     except FileNotFoundError as e:
         raise FileNotFoundError(f"The file at path {file_path} was not found.") from e
     except json.JSONDecodeError as e:
-        raise ValueError(f"The file at path {file_path} does not contain valid JSON.") from e
+        raise ValueError(
+            f"The file at path {file_path} does not contain valid JSON."
+        ) from e
     except IOError as e:
         raise IOError(f"Failed to write to the file at {file_path}.") from e
 
@@ -204,12 +210,8 @@ def add_study_files_to_chromadb(file_path: str, collection_name: str):
         metadatas.append({"file_path": file_path})  # Metadata with file path
 
     # Add documents to the collection in batch
-    collection.add(
-        ids=ids,
-        documents=documents,
-        metadatas=metadatas
-    )
-    
+    collection.add(ids=ids, documents=documents, metadatas=metadatas)
+
     print("All study files have been successfully added to ChromaDB.")
 
 
