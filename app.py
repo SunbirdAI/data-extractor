@@ -134,8 +134,8 @@ def chat_function(message: str, study_name: str, prompt_type: str) -> str:
         "Evidence-based": evidence_based_prompt,
     }.get(prompt_type)
 
-    response = rag.query(message, prompt_template=prompt)
-    return response.response
+    response, _ = rag.query(message, prompt_template=prompt)  # Unpack the tuple
+    return response
 
 
 def process_zotero_library_items(
