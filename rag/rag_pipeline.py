@@ -10,6 +10,8 @@ from llama_index.embeddings.openai import OpenAIEmbedding
 from llama_index.llms.openai import OpenAI
 from llama_index.vector_stores.chroma import ChromaVectorStore
 import chromadb
+from typing import Dict, Any, List, Tuple
+
 
 logging.basicConfig(level=logging.INFO)
 
@@ -27,7 +29,6 @@ class RAGPipeline:
         self.documents = None
         self.client = chromadb.Client()
         self.collection = self.client.get_or_create_collection(self.collection_name)
-        # Embed and store each node in ChromaDB
         self.embedding_model = OpenAIEmbedding(model_name="text-embedding-ada-002")
         self.load_documents()
         self.build_index()
@@ -50,9 +51,12 @@ class RAGPipeline:
                     "authors": ", ".join(doc_data.get("authors", [])),
                     "year": doc_data.get("date"),
                     "doi": doc_data.get("doi"),
+                    "source_file": doc_data.get("source_file"),  # Add source file path
+                    "page_numbers": list(
+                        doc_data.get("pages", {}).keys()
+                    ),  # Add page numbers
                 }
 
-                # Append document data for use in ChromaDB indexing
                 self.documents.append(
                     Document(text=doc_content, id_=f"doc_{index}", metadata=metadata)
                 )
@@ -83,7 +87,7 @@ class RAGPipeline:
 
     def query(
         self, context: str, prompt_template: PromptTemplate = None
-    ) -> Dict[str, Any]:
+    ) -> Tuple[str, Dict[str, Any]]:
         if prompt_template is None:
             prompt_template = PromptTemplate(
                 "Context information is below.\n"
@@ -98,9 +102,7 @@ class RAGPipeline:
                 "Ensure that EVERY statement from the context is properly cited."
             )
 
-        # This is a hack to index all the documents in the store :)
         n_documents = len(self.index.docstore.docs)
-        print(f"n_documents: {n_documents}")
         query_engine = self.index.as_query_engine(
             text_qa_template=prompt_template,
             similarity_top_k=n_documents if n_documents <= 17 else 15,
@@ -108,7 +110,18 @@ class RAGPipeline:
             llm=OpenAI(model="gpt-4o-mini"),
         )
 
-        # Perform the query
         response = query_engine.query(context)
 
-        return response
+        # Extract source information from the response nodes
+        source_info = {}
+        if hasattr(response, "source_nodes") and response.source_nodes:
+            source_node = response.source_nodes[0]  # Get the most relevant source
+            metadata = source_node.metadata
+            source_info = {
+                "source_file": metadata.get("source_file"),
+                "page_numbers": metadata.get("page_numbers", []),
+                "title": metadata.get("title"),
+                "authors": metadata.get("authors"),
+            }
+
+        return response.response, source_info

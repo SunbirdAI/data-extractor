@@ -274,15 +274,36 @@ def process_pdf_uploads(files: List[gr.File], collection_name: str) -> str:
 
 
 def chat_response(
-    message: str, history: List[Tuple[str, str]], study_name: str
-) -> Tuple[List[Tuple[str, str]], str]:
+    message: str,
+    history: List[Tuple[str, str]],
+    study_name: str,
+    pdf_processor: PDFProcessor,
+) -> Tuple[List[Tuple[str, str]], str, Any]:
     """Generate chat response and update history."""
     if not message.strip():
-        return history, None
+        return history, None, None
 
-    response = chat_function(message, study_name, "Default")
+    rag = get_rag_pipeline(study_name)
+    response, source_info = rag.query(message)
     history.append((message, response))
-    return history, None
+
+    # Generate PDF preview if source information is available
+    preview_image = None
+    if (
+        source_info
+        and source_info.get("source_file")
+        and source_info.get("page_numbers")
+    ):
+        try:
+            # Get the first page number from the source
+            page_num = source_info["page_numbers"][0]
+            preview_image = pdf_processor.render_page(
+                source_info["source_file"], int(page_num)
+            )
+        except Exception as e:
+            logger.error(f"Error generating PDF preview: {str(e)}")
+
+    return history, preview_image
 
 
 def create_gr_interface() -> gr.Blocks:
@@ -390,6 +411,9 @@ def create_gr_interface() -> gr.Blocks:
                             upload_btn = gr.Button("Process PDFs", variant="primary")
                         pdf_status = gr.Markdown()
                         current_collection = gr.State(value=None)
+
+        pdf_processor = PDFProcessor()
+
         # Event handlers for Study Analysis tab
         process_zotero_btn.click(
             process_zotero_library_items,
@@ -433,24 +457,28 @@ def create_gr_interface() -> gr.Blocks:
             if not message.strip():
                 raise gr.Error("Please enter a message")
             history = history + [(message, None)]
-            return history, ""
+            return history, "", None  # Return empty preview
 
         def generate_chat_response(history, collection_id):
             """Generate response for the last message in history."""
             if not collection_id:
                 raise gr.Error("Please upload PDFs first")
             if len(history) == 0:
-                return history
+                return history, None
 
             last_message = history[-1][0]
             try:
-                response = chat_function(last_message, collection_id, "Default")
-                history[-1] = (last_message, response)
+                updated_history, preview_image = chat_response(
+                    last_message,
+                    history[:-1],
+                    collection_id,
+                    pdf_processor,
+                )
+                return updated_history, preview_image
             except Exception as e:
                 logger.error(f"Error in generate_chat_response: {str(e)}")
                 history[-1] = (last_message, f"Error: {str(e)}")
-
-            return history
+                return history, None
 
         # Update PDF event handlers
         upload_btn.click(  # Change from pdf_files.upload to upload_btn.click
@@ -463,11 +491,11 @@ def create_gr_interface() -> gr.Blocks:
         chat_submit_btn.click(
             add_message,
             inputs=[chat_history, query_input],
-            outputs=[chat_history, query_input],
+            outputs=[chat_history, query_input, pdf_preview],
         ).success(
             generate_chat_response,
             inputs=[chat_history, current_collection],
-            outputs=[chat_history],
+            outputs=[chat_history, pdf_preview],
         )
 
     return demo
