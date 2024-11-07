@@ -3,6 +3,7 @@ Gradio interface module for ACRES RAG Platform.
 Defines the UI components and layout.
 """
 
+# interface.py
 import gradio as gr
 
 
