@@ -12,8 +12,14 @@ import chromadb
 
 logging.basicConfig(level=logging.INFO)
 
+
 class RAGPipeline:
-    def __init__(self, study_json, collection_name="study_files_rag_collection", use_semantic_splitter=False):
+    def __init__(
+        self,
+        study_json,
+        collection_name="study_files_rag_collection",
+        use_semantic_splitter=False,
+    ):
         self.study_json = study_json
         self.collection_name = collection_name
         self.use_semantic_splitter = use_semantic_splitter
@@ -65,12 +71,14 @@ class RAGPipeline:
 
         # Parse documents into nodes for embedding
         nodes = node_parser.get_nodes_from_documents(self.documents)
-        
+
         # Initialize ChromaVectorStore with the existing collection
         vector_store = ChromaVectorStore(chroma_collection=self.collection)
 
         # Create the VectorStoreIndex using the ChromaVectorStore
-        self.index = VectorStoreIndex(nodes, vector_store=vector_store, embed_model=self.embedding_model)
+        self.index = VectorStoreIndex(
+            nodes, vector_store=vector_store, embed_model=self.embedding_model
+        )
 
     def query(
         self, context: str, prompt_template: PromptTemplate = None
@@ -88,7 +96,7 @@ class RAGPipeline:
                 "If you're unsure about a source, use [?]. "
                 "Ensure that EVERY statement from the context is properly cited."
             )
-        
+
         # This is a hack to index all the documents in the store :)
         n_documents = len(self.index.docstore.docs)
         print(f"n_documents: {n_documents}")
