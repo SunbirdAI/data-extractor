@@ -6,7 +6,7 @@ import io
 import json
 import logging
 import os
-from typing import Tuple
+from typing import Tuple, List
 
 import gradio as gr
 import openai
@@ -22,6 +22,9 @@ from utils.helpers import (
 )
 from utils.prompts import highlight_prompt, evidence_based_prompt
 from utils.zotero_manager import ZoteroManager
+
+from interface import create_chat_interface
+from utils.pdf_processor import PDFProcessor
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -225,120 +228,223 @@ def download_as_csv(markdown_content):
     return temp_path
 
 
+# PDF Support
+
+
+def process_pdf_uploads(
+    files: List[str], collection_name: str
+) -> Tuple[str, gr.update]:
+    """Process uploaded PDF files and add them to the system."""
+    if not files:
+        return "Please upload PDF files", gr.update()
+
+    try:
+        processor = PDFProcessor()
+
+        # Save uploaded files temporarily
+        file_paths = []
+        for file in files:
+            temp_path = os.path.join(processor.upload_dir, file.name)
+            with open(temp_path, "wb") as f:
+                f.write(file.read())
+            file_paths.append(temp_path)
+
+        # Process PDFs
+        output_path = processor.process_pdfs(file_paths, collection_name)
+
+        # Add to study files and ChromaDB
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        collection_id = f"PDF-{timestamp}-{collection_name}"
+        append_to_study_files("study_files.json", collection_id, output_path)
+        add_study_files_to_chromadb("study_files.json", "study_files_collection")
+
+        # Cleanup temporary files
+        for path in file_paths:
+            try:
+                os.remove(path)
+            except Exception as e:
+                logger.warning(f"Failed to remove temporary file {path}: {e}")
+
+        return (
+            f"Successfully processed {len(files)} PDF files into collection: {collection_id}",
+            gr.update(value=output_path),
+        )
+
+    except Exception as e:
+        return f"Error processing PDF files: {str(e)}", gr.update()
+
+
+def chat_response(
+    message: str, history: List[Tuple[str, str]], study_name: str
+) -> Tuple[List[Tuple[str, str]], str]:
+    """Generate chat response and update history."""
+    if not message.strip():
+        return history, None
+
+    response = chat_function(message, study_name, "Default")
+    history.append((message, response))
+    return history, None
+
+
 def create_gr_interface() -> gr.Blocks:
-    """
-    Create and configure the Gradio interface for the RAG platform.
-
-    This function sets up the entire user interface, including:
-    - Chat interface with message input and display
-    - Study selection dropdown
-    - Sample and follow-up question buttons
-    - Prompt type selection
-    - Event handlers for user interactions
-
-    Returns:
-        gr.Blocks: The configured Gradio interface ready for launching.
-    """
-
+    """Create and configure the Gradio interface for the RAG platform."""
     with gr.Blocks() as demo:
         gr.Markdown("# ACRES RAG Platform")
 
-        with gr.Row():
-            with gr.Column(scale=1):
-                gr.Markdown("### Zotero Credentials")
-                zotero_library_id = gr.Textbox(
-                    label="Zotero Library ID",
-                    type="password",
-                    placeholder="Enter Your Zotero Library ID here...",
-                )
-                zotero_api_access_key = gr.Textbox(
-                    label="Zotero API Access Key",
-                    type="password",
-                    placeholder="Enter Your Zotero API Access Key...",
-                )
-                process_zotero_btn = gr.Button("Process your Zotero Library")
-                zotero_output = gr.Markdown(label="Zotero")
-
-                gr.Markdown("### Study Information")
-
-                # Query ChromaDB for all document IDs in the "study_files_collection" collection
-                collection = chromadb_client.get_or_create_collection(
-                    "study_files_collection"
-                )
-                # Retrieve all documents by querying with an empty string and specifying a high n_results
-                all_documents = collection.query(query_texts=[""], n_results=1000)
-                logging.info(f"all_documents: =========> {all_documents}")
-                # Extract document IDs as study names
-                document_ids = all_documents.get("ids")
-                study_choices = [
-                    doc_id for doc_id in document_ids[0] if document_ids
-                ]  # Get list of document IDs
-                logging.info(f"study_choices: ======> {study_choices}")
-
-                # Update the Dropdown with choices from ChromaDB
-                study_dropdown = gr.Dropdown(
-                    choices=study_choices,
-                    label="Select Study",
-                    value=(
-                        study_choices[0] if study_choices else None
-                    ),  # Set first choice as default, if available
-                )
-
-                study_info = gr.Markdown(label="Study Details")
-
-                gr.Markdown("### Settings")
-                prompt_type = gr.Radio(
-                    ["Default", "Highlight", "Evidence-based"],
-                    label="Prompt Type",
-                    value="Default",
-                )
-                # clear = gr.Button("Clear Chat")
-
-            with gr.Column(scale=3):
-                gr.Markdown("### Study Variables")
+        with gr.Tabs() as tabs:
+            # Tab 1: Original Study Analysis Interface
+            with gr.Tab("Study Analysis"):
                 with gr.Row():
-                    study_variables = gr.Textbox(
-                        show_label=False,
-                        placeholder="Type your variables separated by commas e.g (Study ID, Study Title, Authors etc)",
-                        scale=4,
-                        lines=1,
-                        autofocus=True,
-                    )
-                    submit_btn = gr.Button("Submit", scale=1)
-                answer_output = gr.Markdown(label="Answer")
-                # button to download_csv
-                download_btn = gr.DownloadButton(
-                    "Download as CSV",
-                    variant="primary",
-                    size="sm",
-                    scale=1,
-                    visible=False,
-                )
+                    with gr.Column(scale=1):
+                        gr.Markdown("### Zotero Credentials")
+                        zotero_library_id = gr.Textbox(
+                            label="Zotero Library ID",
+                            type="password",
+                            placeholder="Enter Your Zotero Library ID here...",
+                        )
+                        zotero_api_access_key = gr.Textbox(
+                            label="Zotero API Access Key",
+                            type="password",
+                            placeholder="Enter Your Zotero API Access Key...",
+                        )
+                        process_zotero_btn = gr.Button("Process your Zotero Library")
+                        zotero_output = gr.Markdown(label="Zotero")
 
-        study_dropdown.change(
-            fn=get_study_info,
-            inputs=study_dropdown,
-            outputs=[study_info],
-        )
+                        gr.Markdown("### Study Information")
+                        collection = chromadb_client.get_or_create_collection(
+                            "study_files_collection"
+                        )
+                        all_documents = collection.query(
+                            query_texts=[""], n_results=1000
+                        )
+                        study_choices = [
+                            doc_id
+                            for doc_id in all_documents.get("ids")[0]
+                            if all_documents
+                        ]
 
+                        study_dropdown = gr.Dropdown(
+                            choices=study_choices,
+                            label="Select Study",
+                            value=(study_choices[0] if study_choices else None),
+                        )
+                        study_info = gr.Markdown(label="Study Details")
+                        prompt_type = gr.Radio(
+                            ["Default", "Highlight", "Evidence-based"],
+                            label="Prompt Type",
+                            value="Default",
+                        )
+
+                    with gr.Column(scale=3):
+                        gr.Markdown("### Study Variables")
+                        with gr.Row():
+                            study_variables = gr.Textbox(
+                                show_label=False,
+                                placeholder="Type your variables separated by commas e.g (Study ID, Study Title, Authors etc)",
+                                scale=4,
+                                lines=1,
+                                autofocus=True,
+                            )
+                            submit_btn = gr.Button("Submit", scale=1)
+                        answer_output = gr.Markdown(label="Answer")
+                        download_btn = gr.DownloadButton(
+                            "Download as CSV",
+                            variant="primary",
+                            size="sm",
+                            scale=1,
+                            visible=False,
+                        )
+
+            # Tab 2: PDF Chat Interface
+            with gr.Tab("PDF Chat"):
+                with gr.Row():
+                    # Left column: Chat and Input
+                    with gr.Column(scale=7):
+                        chat_history = gr.Chatbot(
+                            value=[], height=600, show_label=False
+                        )
+                        with gr.Row():
+                            query_input = gr.Textbox(
+                                show_label=False,
+                                placeholder="Ask a question about your PDFs...",
+                                scale=8,
+                            )
+                            chat_submit_btn = gr.Button(
+                                "Send", scale=2, variant="primary"
+                            )
+
+                    # Right column: PDF Preview and Upload
+                    with gr.Column(scale=3):
+                        pdf_preview = gr.Image(label="Source Page", height=600)
+                        with gr.Row():
+                            pdf_files = gr.File(
+                                file_count="multiple",
+                                file_types=[".pdf"],
+                                label="Upload PDFs",
+                            )
+                        with gr.Row():
+                            collection_name = gr.Textbox(
+                                label="Collection Name",
+                                placeholder="Name this PDF collection...",
+                            )
+                        pdf_status = gr.Markdown()
+
+        # Event handlers for Study Analysis tab
         process_zotero_btn.click(
             process_zotero_library_items,
             inputs=[zotero_library_id, zotero_api_access_key],
             outputs=[zotero_output],
-            queue=False,
         )
+
+        study_dropdown.change(
+            get_study_info, inputs=[study_dropdown], outputs=[study_info]
+        )
+
         submit_btn.click(
             process_multi_input,
             inputs=[study_variables, study_dropdown, prompt_type],
             outputs=[answer_output, download_btn],
-            queue=False,
         )
+
         download_btn.click(
-            fn=download_as_csv,
-            inputs=[answer_output],
-            outputs=[download_btn],
-        ).then(
-            fn=cleanup_temp_files, inputs=None, outputs=None  # Clean up after download
+            fn=download_as_csv, inputs=[answer_output], outputs=[download_btn]
+        ).then(fn=cleanup_temp_files, inputs=None, outputs=None)
+
+        # Event handlers for PDF Chat tab
+        def add_message(history, message):
+            """Add user message to chat history."""
+            if not message.strip():
+                raise gr.Error("Please enter a message")
+            history = history + [(message, None)]
+            return history, ""
+
+        def generate_chat_response(history, collection):
+            """Generate response for the last message in history."""
+            if len(history) == 0:
+                return history
+
+            last_message = history[-1][0]
+            response = chat_function(last_message, collection, "Default")
+
+            # Update the last message pair with the response
+            history[-1] = (last_message, response)
+            return history
+
+        pdf_files.upload(
+            process_pdf_uploads,
+            inputs=[pdf_files, collection_name],
+            outputs=[pdf_status],
+        )
+
+        # Fixed chat event handling
+        chat_submit_btn.click(
+            add_message,
+            inputs=[chat_history, query_input],
+            outputs=[chat_history, query_input],
+        ).success(
+            generate_chat_response,
+            inputs=[chat_history, collection_name],
+            outputs=[chat_history],
         )
 
     return demo

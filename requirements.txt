@@ -10,3 +10,5 @@ pydantic
 python-dotenv
 pyzotero
 python-slugify
+PyMuPDF==1.23.8  
+Pillow==10.2.0 
