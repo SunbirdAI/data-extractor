@@ -40,26 +40,32 @@ class RAGPipeline:
 
             self.documents = []
             for index, doc_data in enumerate(self.data):
-                doc_content = (
-                    f"Title: {doc_data['title']}\n"
-                    f"Abstract: {doc_data['abstract']}\n"
-                    f"Authors: {', '.join(doc_data['authors'])}\n"
-                )
+                # Process each page's content separately
+                pages = doc_data.get("pages", {})
+                for page_num, page_content in pages.items():
+                    doc_content = (
+                        f"Title: {doc_data['title']}\n"
+                        f"Page {page_num} Content:\n{page_content}\n"
+                        f"Authors: {', '.join(doc_data['authors'])}\n"
+                    )
 
-                metadata = {
-                    "title": doc_data.get("title"),
-                    "authors": ", ".join(doc_data.get("authors", [])),
-                    "year": doc_data.get("date"),
-                    "doi": doc_data.get("doi"),
-                    "source_file": doc_data.get("source_file"),  # Add source file path
-                    "page_numbers": list(
-                        doc_data.get("pages", {}).keys()
-                    ),  # Add page numbers
-                }
+                    metadata = {
+                        "title": doc_data.get("title"),
+                        "authors": ", ".join(doc_data.get("authors", [])),
+                        "year": doc_data.get("date"),
+                        "doi": doc_data.get("doi"),
+                        "source_file": doc_data.get("source_file"),
+                        "page_number": page_num,  # Store single page number
+                        "total_pages": len(pages),
+                    }
 
-                self.documents.append(
-                    Document(text=doc_content, id_=f"doc_{index}", metadata=metadata)
-                )
+                    self.documents.append(
+                        Document(
+                            text=doc_content,
+                            id_=f"doc_{index}_page_{page_num}",
+                            metadata=metadata,
+                        )
+                    )
 
     def build_index(self):
         sentence_splitter = SentenceSplitter(chunk_size=2048, chunk_overlap=20)
@@ -95,17 +101,16 @@ class RAGPipeline:
                 "{context_str}\n"
                 "---------------------\n"
                 "Given this information, please answer the question: {query_str}\n"
-                "Provide an answer to the question using evidence from the context above. "
+                "Provide a detailed answer using the content from the context above. "
+                "If the question asks about specific page content, make sure to include that information. "
                 "Cite sources using square brackets for EVERY piece of information, e.g. [1], [2], etc. "
-                "Even if there's only one source, still include the citation. "
-                "If you're unsure about a source, use [?]. "
-                "Ensure that EVERY statement from the context is properly cited."
+                "Include page numbers in citations when available, e.g. [1, p.3]. "
+                "If you're unsure about something, say so rather than making assumptions."
             )
 
-        n_documents = len(self.index.docstore.docs)
         query_engine = self.index.as_query_engine(
             text_qa_template=prompt_template,
-            similarity_top_k=n_documents if n_documents <= 17 else 15,
+            similarity_top_k=5,  # Reduced for more focused results
             response_mode="tree_summarize",
             llm=OpenAI(model="gpt-4o-mini"),
         )
@@ -115,13 +120,15 @@ class RAGPipeline:
         # Extract source information from the response nodes
         source_info = {}
         if hasattr(response, "source_nodes") and response.source_nodes:
-            source_node = response.source_nodes[0]  # Get the most relevant source
+            # Get the most relevant source
+            source_node = response.source_nodes[0]
             metadata = source_node.metadata
             source_info = {
                 "source_file": metadata.get("source_file"),
-                "page_numbers": metadata.get("page_numbers", []),
+                "page_number": metadata.get("page_number"),
                 "title": metadata.get("title"),
                 "authors": metadata.get("authors"),
+                "content": source_node.text,  # Include the actual content
             }
 
         return response.response, source_info

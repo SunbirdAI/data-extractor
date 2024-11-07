@@ -6,7 +6,7 @@ import io
 import json
 import logging
 import os
-from typing import Tuple, List
+from typing import Tuple, List, Any
 
 import gradio as gr
 import openai
