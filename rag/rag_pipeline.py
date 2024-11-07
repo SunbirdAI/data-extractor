@@ -11,9 +11,12 @@ from llama_index.llms.openai import OpenAI
 from llama_index.vector_stores.chroma import ChromaVectorStore
 import chromadb
 from typing import Dict, Any, List, Tuple
+import re
+import logging
 
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 class RAGPipeline:
@@ -32,6 +35,23 @@ class RAGPipeline:
         self.embedding_model = OpenAIEmbedding(model_name="text-embedding-ada-002")
         self.load_documents()
         self.build_index()
+
+    def extract_page_number_from_query(self, query: str) -> int:
+        """Extract page number from query text."""
+        # Look for patterns like "page 3", "p3", "p. 3", etc.
+        patterns = [
+            r"page\s*(\d+)",
+            r"p\.\s*(\d+)",
+            r"p\s*(\d+)",
+            r"pg\.\s*(\d+)",
+            r"pg\s*(\d+)",
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, query.lower())
+            if match:
+                return int(match.group(1))
+        return None
 
     def load_documents(self):
         if self.documents is None:
@@ -55,7 +75,7 @@ class RAGPipeline:
                         "year": doc_data.get("date"),
                         "doi": doc_data.get("doi"),
                         "source_file": doc_data.get("source_file"),
-                        "page_number": page_num,  # Store single page number
+                        "page_number": int(page_num),  # Store as integer
                         "total_pages": len(pages),
                     }
 
@@ -103,14 +123,17 @@ class RAGPipeline:
                 "Given this information, please answer the question: {query_str}\n"
                 "Provide a detailed answer using the content from the context above. "
                 "If the question asks about specific page content, make sure to include that information. "
-                "Cite sources using square brackets for EVERY piece of information, e.g. [1], [2], etc. "
-                "Include page numbers in citations when available, e.g. [1, p.3]. "
+                "Cite sources using square brackets for EVERY piece of information, e.g. [1, p.3], [2, p.5], etc. "
                 "If you're unsure about something, say so rather than making assumptions."
             )
 
+        # Extract page number from query if present
+        requested_page = self.extract_page_number_from_query(context)
+        logger.info(f"Requested page number: {requested_page}")
+
         query_engine = self.index.as_query_engine(
             text_qa_template=prompt_template,
-            similarity_top_k=5,  # Reduced for more focused results
+            similarity_top_k=5,
             response_mode="tree_summarize",
             llm=OpenAI(model="gpt-4o-mini"),
         )
@@ -120,15 +143,23 @@ class RAGPipeline:
         # Extract source information from the response nodes
         source_info = {}
         if hasattr(response, "source_nodes") and response.source_nodes:
-            # Get the most relevant source
             source_node = response.source_nodes[0]
             metadata = source_node.metadata
+
+            # Use requested page number if available, otherwise use the page from metadata
+            page_number = (
+                requested_page
+                if requested_page is not None
+                else metadata.get("page_number", 0)
+            )
+
             source_info = {
                 "source_file": metadata.get("source_file"),
-                "page_number": metadata.get("page_number"),
+                "page_number": page_number,
                 "title": metadata.get("title"),
                 "authors": metadata.get("authors"),
-                "content": source_node.text,  # Include the actual content
+                "content": source_node.text,
             }
+            logger.info(f"Source info page number: {page_number}")
 
         return response.response, source_info

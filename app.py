@@ -1,7 +1,10 @@
 # app.py
 
 import csv
+
 import datetime
+
+# from datetime import datetime
 import io
 import json
 import logging
@@ -377,6 +380,8 @@ def create_gr_interface() -> gr.Blocks:
 
             # Tab 2: PDF Chat Interface
             with gr.Tab("PDF Chat"):
+                pdf_processor = PDFProcessor()
+
                 with gr.Row():
                     # Left column: Chat and Input
                     with gr.Column(scale=7):
@@ -412,8 +417,6 @@ def create_gr_interface() -> gr.Blocks:
                         pdf_status = gr.Markdown()
                         current_collection = gr.State(value=None)
 
-        pdf_processor = PDFProcessor()
-
         # Event handlers for Study Analysis tab
         process_zotero_btn.click(
             process_zotero_library_items,
@@ -438,7 +441,6 @@ def create_gr_interface() -> gr.Blocks:
         # Event handlers for PDF Chat tab
 
         def handle_pdf_upload(files, name):
-            """Handle PDF upload and processing."""
             if not name:
                 return "Please provide a collection name", None
             if not files:
@@ -452,14 +454,20 @@ def create_gr_interface() -> gr.Blocks:
                 logger.error(f"Error in handle_pdf_upload: {str(e)}")
                 return f"Error: {str(e)}", None
 
+        upload_btn.click(
+            handle_pdf_upload,
+            inputs=[pdf_files, collection_name],
+            outputs=[pdf_status, current_collection],
+        )
+
         def add_message(history, message):
             """Add user message to chat history."""
             if not message.strip():
                 raise gr.Error("Please enter a message")
             history = history + [(message, None)]
-            return history, "", None  # Return empty preview
+            return history, "", None
 
-        def generate_chat_response(history, collection_id):
+        def generate_chat_response(history, collection_id, pdf_processor):
             """Generate response for the last message in history."""
             if not collection_id:
                 raise gr.Error("Please upload PDFs first")
@@ -468,13 +476,39 @@ def create_gr_interface() -> gr.Blocks:
 
             last_message = history[-1][0]
             try:
-                updated_history, preview_image = chat_response(
-                    last_message,
-                    history[:-1],
-                    collection_id,
-                    pdf_processor,
-                )
-                return updated_history, preview_image
+                # Get response and source info
+                rag = get_rag_pipeline(collection_id)
+                response, source_info = rag.query(last_message)
+
+                # Generate preview if source information is available
+                preview_image = None
+                if (
+                    source_info
+                    and source_info.get("source_file")
+                    and source_info.get("page_number") is not None
+                ):
+                    try:
+                        page_num = source_info["page_number"]
+                        logger.info(f"Attempting to render page {page_num}")
+                        preview_image = pdf_processor.render_page(
+                            source_info["source_file"], page_num
+                        )
+                        if preview_image:
+                            logger.info(
+                                f"Successfully generated preview for page {page_num}"
+                            )
+                        else:
+                            logger.warning(
+                                f"Failed to generate preview for page {page_num}"
+                            )
+                    except Exception as e:
+                        logger.error(f"Error generating PDF preview: {str(e)}")
+                        preview_image = None
+
+                # Update history with response
+                history[-1] = (last_message, response)
+                return history, preview_image
+
             except Exception as e:
                 logger.error(f"Error in generate_chat_response: {str(e)}")
                 history[-1] = (last_message, f"Error: {str(e)}")
@@ -493,7 +527,7 @@ def create_gr_interface() -> gr.Blocks:
             inputs=[chat_history, query_input],
             outputs=[chat_history, query_input, pdf_preview],
         ).success(
-            generate_chat_response,
+            lambda h, c: generate_chat_response(h, c, pdf_processor),
             inputs=[chat_history, current_collection],
             outputs=[chat_history, pdf_preview],
         )
