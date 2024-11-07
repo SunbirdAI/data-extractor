@@ -24,35 +24,43 @@ class PDFProcessor:
 
     def extract_text_from_pdf(self, file_path: str) -> Dict:
         """Extract text and metadata from a PDF file."""
-        doc = fitz.open(file_path)
+        try:
+            doc = fitz.open(file_path)
 
-        # Extract text from all pages with page tracking
-        text = ""
-        pages = {}
-        for page_num in range(len(doc)):
-            page_text = doc[page_num].get_text()
-            pages[page_num] = page_text
-            text += page_text + "\n"
+            # Extract text from all pages with page tracking
+            text = ""
+            pages = {}
+            for page_num in range(len(doc)):
+                page_text = doc[page_num].get_text()
+                pages[page_num] = page_text
+                text += page_text + "\n"
 
-        # Extract metadata
-        metadata = doc.metadata
-        if not metadata.get("title"):
-            metadata["title"] = os.path.basename(file_path)
+            # Extract metadata
+            metadata = doc.metadata
+            if not metadata.get("title"):
+                metadata["title"] = os.path.basename(file_path)
 
-        # Create structured document
-        document = {
-            "title": metadata.get("title", ""),
-            "authors": metadata.get("author", "").split(";"),
-            "date": metadata.get("creationDate", ""),
-            "abstract": text[:500] + "..." if len(text) > 500 else text,
-            "full_text": text,
-            "source_file": file_path,
-            "pages": pages,
-            "page_count": len(doc),
-        }
+            # Create structured document
+            document = {
+                "title": metadata.get("title", ""),
+                "authors": (
+                    metadata.get("author", "").split(";")
+                    if metadata.get("author")
+                    else []
+                ),
+                "date": metadata.get("creationDate", ""),
+                "abstract": text[:500] + "..." if len(text) > 500 else text,
+                "full_text": text,
+                "source_file": file_path,
+                "pages": pages,
+                "page_count": len(doc),
+            }
 
-        doc.close()
-        return document
+            doc.close()
+            return document
+        except Exception as e:
+            logger.error(f"Error processing PDF {file_path}: {str(e)}")
+            raise
 
     def process_pdfs(self, file_paths: List[str], collection_name: str) -> str:
         """Process multiple PDF files and store their content."""

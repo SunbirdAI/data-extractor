@@ -231,12 +231,10 @@ def download_as_csv(markdown_content):
 # PDF Support
 
 
-def process_pdf_uploads(
-    files: List[str], collection_name: str
-) -> Tuple[str, gr.update]:
+def process_pdf_uploads(files: List[gr.File], collection_name: str) -> str:
     """Process uploaded PDF files and add them to the system."""
-    if not files:
-        return "Please upload PDF files", gr.update()
+    if not files or not collection_name:
+        return "Please upload PDF files and provide a collection name"
 
     try:
         processor = PDFProcessor()
@@ -244,34 +242,35 @@ def process_pdf_uploads(
         # Save uploaded files temporarily
         file_paths = []
         for file in files:
-            temp_path = os.path.join(processor.upload_dir, file.name)
-            with open(temp_path, "wb") as f:
-                f.write(file.read())
+            # Get the actual file path from the Gradio File object
+            if hasattr(file, "name"):  # If it's already a path
+                temp_path = file.name
+            else:  # If it needs to be saved
+                temp_path = os.path.join(processor.upload_dir, file.orig_name)
+                file.save(temp_path)
             file_paths.append(temp_path)
 
         # Process PDFs
         output_path = processor.process_pdfs(file_paths, collection_name)
 
         # Add to study files and ChromaDB
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        collection_id = f"PDF-{timestamp}-{collection_name}"
+        collection_id = f"pdf_{slugify(collection_name)}"
         append_to_study_files("study_files.json", collection_id, output_path)
         add_study_files_to_chromadb("study_files.json", "study_files_collection")
 
-        # Cleanup temporary files
+        # Cleanup temporary files if they were created by us
         for path in file_paths:
-            try:
-                os.remove(path)
-            except Exception as e:
-                logger.warning(f"Failed to remove temporary file {path}: {e}")
+            if path.startswith(processor.upload_dir):
+                try:
+                    os.remove(path)
+                except Exception as e:
+                    logger.warning(f"Failed to remove temporary file {path}: {e}")
 
-        return (
-            f"Successfully processed {len(files)} PDF files into collection: {collection_id}",
-            gr.update(value=output_path),
-        )
+        return f"Successfully processed PDFs into collection: {collection_id}"
 
     except Exception as e:
-        return f"Error processing PDF files: {str(e)}", gr.update()
+        logger.error(f"Error in process_pdf_uploads: {str(e)}")
+        return f"Error processing PDF files: {str(e)}"
 
 
 def chat_response(
@@ -387,8 +386,10 @@ def create_gr_interface() -> gr.Blocks:
                                 label="Collection Name",
                                 placeholder="Name this PDF collection...",
                             )
+                        with gr.Row():
+                            upload_btn = gr.Button("Process PDFs", variant="primary")
                         pdf_status = gr.Markdown()
-
+                        current_collection = gr.State(value=None)
         # Event handlers for Study Analysis tab
         process_zotero_btn.click(
             process_zotero_library_items,
@@ -411,6 +412,22 @@ def create_gr_interface() -> gr.Blocks:
         ).then(fn=cleanup_temp_files, inputs=None, outputs=None)
 
         # Event handlers for PDF Chat tab
+
+        def handle_pdf_upload(files, name):
+            """Handle PDF upload and processing."""
+            if not name:
+                return "Please provide a collection name", None
+            if not files:
+                return "Please select PDF files", None
+
+            try:
+                result = process_pdf_uploads(files, name)
+                collection_id = f"pdf_{slugify(name)}"
+                return result, collection_id
+            except Exception as e:
+                logger.error(f"Error in handle_pdf_upload: {str(e)}")
+                return f"Error: {str(e)}", None
+
         def add_message(history, message):
             """Add user message to chat history."""
             if not message.strip():
@@ -418,22 +435,28 @@ def create_gr_interface() -> gr.Blocks:
             history = history + [(message, None)]
             return history, ""
 
-        def generate_chat_response(history, collection):
+        def generate_chat_response(history, collection_id):
             """Generate response for the last message in history."""
+            if not collection_id:
+                raise gr.Error("Please upload PDFs first")
             if len(history) == 0:
                 return history
 
             last_message = history[-1][0]
-            response = chat_function(last_message, collection, "Default")
+            try:
+                response = chat_function(last_message, collection_id, "Default")
+                history[-1] = (last_message, response)
+            except Exception as e:
+                logger.error(f"Error in generate_chat_response: {str(e)}")
+                history[-1] = (last_message, f"Error: {str(e)}")
 
-            # Update the last message pair with the response
-            history[-1] = (last_message, response)
             return history
 
-        pdf_files.upload(
-            process_pdf_uploads,
+        # Update PDF event handlers
+        upload_btn.click(  # Change from pdf_files.upload to upload_btn.click
+            handle_pdf_upload,
             inputs=[pdf_files, collection_name],
-            outputs=[pdf_status],
+            outputs=[pdf_status, current_collection],
         )
 
         # Fixed chat event handling
@@ -443,7 +466,7 @@ def create_gr_interface() -> gr.Blocks:
             outputs=[chat_history, query_input],
         ).success(
             generate_chat_response,
-            inputs=[chat_history, collection_name],
+            inputs=[chat_history, current_collection],
             outputs=[chat_history],
         )
 
