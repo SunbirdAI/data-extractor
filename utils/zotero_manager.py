@@ -1,3 +1,5 @@
+# utils/zotero_manager.py
+
 import json
 import os
 from typing import Any, Dict, List, Optional
