@@ -1,46 +1,135 @@
 # app.py
 
+import csv
+import datetime
+import io
 import json
-from typing import List, Tuple
-import os
 import logging
+import os
+from typing import Tuple
 
 import gradio as gr
+import openai
 from dotenv import load_dotenv
 from slugify import slugify
 
+from config import STUDY_FILES, OPENAI_API_KEY
 from rag.rag_pipeline import RAGPipeline
 from utils.helpers import (
-    generate_follow_up_questions,
     append_to_study_files,
     add_study_files_to_chromadb,
     chromadb_client,
 )
-from utils.prompts import (
-    highlight_prompt,
-    evidence_based_prompt,
-    sample_questions,
-)
-import openai
-
-from config import STUDY_FILES, OPENAI_API_KEY
+from utils.prompts import highlight_prompt, evidence_based_prompt
 from utils.zotero_manager import ZoteroManager
 
-import csv
-import io
-
-import datetime
-
-load_dotenv()
+# Configure logging
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+load_dotenv()
 
 openai.api_key = OPENAI_API_KEY
 
-# After loop, add all collected data to ChromaDB
+# Initialize ChromaDB with study files
 add_study_files_to_chromadb("study_files.json", "study_files_collection")
 
 # Cache for RAG pipelines
 rag_cache = {}
+
+
+def get_rag_pipeline(study_name: str) -> RAGPipeline:
+    """Get or create a RAGPipeline instance for the given study by querying ChromaDB."""
+    if study_name not in rag_cache:
+        collection = chromadb_client.get_or_create_collection("study_files_collection")
+        result = collection.get(ids=[study_name])  # Retrieve document by ID
+
+        if not result or len(result["metadatas"]) == 0:
+            raise ValueError(f"Invalid study name: {study_name}")
+
+        study_file = result["metadatas"][0].get("file_path")
+        if not study_file:
+            raise ValueError(f"File path not found for study name: {study_name}")
+
+        rag_cache[study_name] = RAGPipeline(study_file)
+
+    return rag_cache[study_name]
+
+
+def get_study_info(study_name: str) -> str:
+    """Retrieve information about the specified study."""
+
+    collection = chromadb_client.get_or_create_collection("study_files_collection")
+    result = collection.get(ids=[study_name])  # Query by study name (as a list)
+    logging.info(f"Result: ======> {result}")
+
+    if not result or len(result["metadatas"]) == 0:
+        raise ValueError(f"Invalid study name: {study_name}")
+
+    study_file = result["metadatas"][0].get("file_path")
+    logging.info(f"study_file: =======> {study_file}")
+    if not study_file:
+        raise ValueError(f"File path not found for study name: {study_name}")
+
+    with open(study_file, "r") as f:
+        data = json.load(f)
+    return f"### Number of documents: {len(data)}"
+
+
+def markdown_table_to_csv(markdown_text: str) -> str:
+    """Convert a markdown table to CSV format."""
+    lines = [line.strip() for line in markdown_text.split("\n") if line.strip()]
+    table_lines = [line for line in lines if line.startswith("|")]
+
+    if not table_lines:
+        return ""
+
+    csv_data = []
+    for line in table_lines:
+        if "---" in line:
+            continue
+        # Split by |, remove empty strings, and strip whitespace
+        cells = [cell.strip() for cell in line.split("|") if cell.strip()]
+        csv_data.append(cells)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerows(csv_data)
+    return output.getvalue()
+
+
+def cleanup_temp_files():
+    """Clean up old temporary files."""
+    try:
+        current_time = datetime.datetime.now()
+        for file in os.listdir():
+            if file.startswith("study_export_") and file.endswith(".csv"):
+                file_time = datetime.datetime.fromtimestamp(os.path.getmtime(file))
+                # Calculate the time difference in seconds
+                time_difference = (current_time - file_time).total_seconds()
+                if time_difference > 20:  # 5 minutes in seconds
+                    try:
+                        os.remove(file)
+                    except Exception as e:
+                        logging.warning(f"Failed to remove temp file {file}: {e}")
+    except Exception as e:
+        logging.warning(f"Error during cleanup: {e}")
+
+
+def chat_function(message: str, study_name: str, prompt_type: str) -> str:
+    """Process a chat message and generate a response using the RAG pipeline."""
+
+    if not message.strip():
+        return "Please enter a valid query."
+
+    rag = get_rag_pipeline(study_name)
+    logging.info(f"rag: ==> {rag}")
+    prompt = {
+        "Highlight": highlight_prompt,
+        "Evidence-based": evidence_based_prompt,
+    }.get(prompt_type)
+
+    response = rag.query(message, prompt_template=prompt)
+    return response.response
 
 
 def process_zotero_library_items(
@@ -80,7 +169,7 @@ def process_zotero_library_items(
                 zotero_collection_items = (
                     zotero_manager.get_collection_zotero_items_by_key(collection_key)
                 )
-                #### Export zotero collection items to json ####
+                # Export zotero collection items to json
                 zotero_items_json = zotero_manager.zotero_items_to_json(
                     zotero_collection_items
                 )
@@ -108,111 +197,6 @@ def process_zotero_library_items(
     return message
 
 
-def get_rag_pipeline(study_name: str) -> RAGPipeline:
-    """Get or create a RAGPipeline instance for the given study by querying ChromaDB."""
-    if study_name not in rag_cache:
-        # Query ChromaDB for the study file path by ID
-        collection = chromadb_client.get_or_create_collection("study_files_collection")
-        result = collection.get(ids=[study_name])  # Retrieve document by ID
-
-        # Check if the result contains the requested document
-        if not result or len(result["metadatas"]) == 0:
-            raise ValueError(f"Invalid study name: {study_name}")
-
-        # Extract the file path from the document metadata
-        study_file = result["metadatas"][0].get("file_path")
-        if not study_file:
-            raise ValueError(f"File path not found for study name: {study_name}")
-
-        # Create and cache the RAGPipeline instance
-        rag_cache[study_name] = RAGPipeline(study_file)
-
-    return rag_cache[study_name]
-
-
-def chat_function(message: str, study_name: str, prompt_type: str) -> str:
-    """Process a chat message and generate a response using the RAG pipeline."""
-
-    if not message.strip():
-        return "Please enter a valid query."
-
-    rag = get_rag_pipeline(study_name)
-    logging.info(f"rag: ==> {rag}")
-    prompt = {
-        "Highlight": highlight_prompt,
-        "Evidence-based": evidence_based_prompt,
-    }.get(prompt_type)
-
-    response = rag.query(message, prompt_template=prompt)
-    return response.response
-
-
-def get_study_info(study_name: str) -> str:
-    """Retrieve information about the specified study."""
-
-    collection = chromadb_client.get_or_create_collection("study_files_collection")
-    result = collection.get(ids=[study_name])  # Query by study name (as a list)
-    logging.info(f"Result: ======> {result}")
-
-    # Check if the document exists in the result
-    if not result or len(result["metadatas"]) == 0:
-        raise ValueError(f"Invalid study name: {study_name}")
-
-    # Extract the file path from the document metadata
-    study_file = result["metadatas"][0].get("file_path")
-    logging.info(f"study_file: =======> {study_file}")
-    if not study_file:
-        raise ValueError(f"File path not found for study name: {study_name}")
-
-    with open(study_file, "r") as f:
-        data = json.load(f)
-    return f"### Number of documents: {len(data)}"
-
-
-def markdown_table_to_csv(markdown_text: str) -> str:
-    """Convert a markdown table to CSV format."""
-    # Split the text into lines and remove empty lines
-    lines = [line.strip() for line in markdown_text.split("\n") if line.strip()]
-
-    # Find the table content (lines starting with |)
-    table_lines = [line for line in lines if line.startswith("|")]
-
-    if not table_lines:
-        return ""
-
-    # Process each line to extract cell values
-    csv_data = []
-    for line in table_lines:
-        # Skip separator lines (containing only dashes)
-        if "---" in line:
-            continue
-        # Split by |, remove empty strings, and strip whitespace
-        cells = [cell.strip() for cell in line.split("|") if cell.strip()]
-        csv_data.append(cells)
-
-    # Create CSV string
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerows(csv_data)
-    return output.getvalue()
-
-
-def update_interface(study_name: str) -> Tuple[str, gr.update, gr.update, gr.update]:
-    """Update the interface based on the selected study."""
-
-    study_info = get_study_info(study_name)
-    questions = sample_questions.get(study_name, [])[:3]
-    if not questions:
-        questions = sample_questions.get("General", [])[:3]
-    visible_questions = [gr.update(visible=True, value=q) for q in questions]
-    hidden_questions = [gr.update(visible=False) for _ in range(3 - len(questions))]
-    return (study_info, *visible_questions, *hidden_questions)
-
-
-def set_question(question: str) -> str:
-    return question.lstrip("✨ ")
-
-
 def process_multi_input(text, study_name, prompt_type):
     # Split input based on commas and strip any extra spaces
     variable_list = [word.strip().upper() for word in text.split(",")]
@@ -220,6 +204,25 @@ def process_multi_input(text, study_name, prompt_type):
     logging.info(f"User message: ==> {user_message}")
     response = chat_function(user_message, study_name, prompt_type)
     return [response, gr.update(visible=True)]
+
+
+def download_as_csv(markdown_content):
+    """Convert markdown table to CSV and provide for download."""
+    if not markdown_content:
+        return None
+
+    csv_content = markdown_table_to_csv(markdown_content)
+    if not csv_content:
+        return None
+
+    # Create temporary file with actual content
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    temp_path = f"study_export_{timestamp}.csv"
+
+    with open(temp_path, "w", newline="", encoding="utf-8") as f:
+        f.write(csv_content)
+
+    return temp_path
 
 
 def create_gr_interface() -> gr.Blocks:
@@ -311,44 +314,6 @@ def create_gr_interface() -> gr.Blocks:
                     scale=1,
                     visible=False,
                 )
-
-        def download_as_csv(markdown_content):
-            """Convert markdown table to CSV and provide for download."""
-            if not markdown_content:
-                return None
-
-            csv_content = markdown_table_to_csv(markdown_content)
-            if not csv_content:
-                return None
-
-            # Create temporary file with actual content
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            temp_path = f"study_export_{timestamp}.csv"
-
-            with open(temp_path, "w", newline="", encoding="utf-8") as f:
-                f.write(csv_content)
-
-            return temp_path
-
-        def cleanup_temp_files():
-            """Clean up old temporary files."""
-            try:
-                # Delete files older than 5 minutes
-                current_time = datetime.datetime.now()
-                for file in os.listdir():
-                    if file.startswith("study_export_") and file.endswith(".csv"):
-                        file_time = datetime.datetime.fromtimestamp(
-                            os.path.getmtime(file)
-                        )
-                        if (current_time - file_time).seconds > 30:  # 5 minutes
-                            try:
-                                os.remove(file)
-                            except Exception as e:
-                                logging.warning(
-                                    f"Failed to remove temp file {file}: {e}"
-                                )
-            except Exception as e:
-                logging.warning(f"Error during cleanup: {e}")
 
         study_dropdown.change(
             fn=get_study_info,
