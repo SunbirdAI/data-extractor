@@ -172,9 +172,13 @@ class RAGPipeline:
             self.extract_page_number_from_query(context) if self.is_pdf else None
         )
 
+
+        # This is a hack to index all the documents in the store :)
+        n_documents = len(self.index.docstore.docs)
+        print(f"n_documents: {n_documents}")
         query_engine = self.index.as_query_engine(
             text_qa_template=prompt_template,
-            similarity_top_k=5,
+            similarity_top_k=n_documents if n_documents <= 17 else 15,
             response_mode="tree_summarize",
             llm=OpenAI(model="gpt-4o-mini"),
         )
