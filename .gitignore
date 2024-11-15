@@ -173,5 +173,5 @@ poetry.toml
 pyrightconfig.json
 
 # data
-data/
+# data/
 study_export_*
