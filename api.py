@@ -1,4 +1,5 @@
 import os
+import logging
 
 from fastapi import FastAPI, HTTPException
 from gradio_client import Client
@@ -6,16 +7,22 @@ from enum import Enum
 from typing import List, Optional
 from pydantic import BaseModel, Field, constr, ConfigDict
 from fastapi.responses import FileResponse
+from dotenv import load_dotenv
 
 from docs import description, tags_metadata
 
+load_dotenv()
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="ACRES RAG API",
     description=description,
     openapi_tags=tags_metadata,
 )
-client = Client("http://localhost:7860/")
+GRADIO_URL = os.getenv("GRADIO_URL", "http://localhost:7860/")
+logger.info(f"GRADIO_URL: =======> {GRADIO_URL}")
+client = Client(GRADIO_URL)
 
 class StudyVariables(str, Enum):
     ebola_virus = "Ebola Virus"
