@@ -88,7 +88,7 @@ def append_to_study_files(file_path, new_key, new_value):
             "Gene Xpert": "data/gene_xpert_zotero_items.json"
         }
     """
-    try:
+    try: 
         # Read the existing data from the file
         with open(file_path, "r") as file:
             data = json.load(file)
