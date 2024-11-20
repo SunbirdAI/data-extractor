@@ -15,6 +15,7 @@ import gradio as gr
 import openai
 from dotenv import load_dotenv
 from slugify import slugify
+from cachetools import LRUCache
 
 from config import STUDY_FILES, OPENAI_API_KEY
 from rag.rag_pipeline import RAGPipeline
@@ -23,6 +24,7 @@ from utils.helpers import (
     add_study_files_to_chromadb,
     chromadb_client,
 )
+from utils.db import create_db_and_tables, add_study_files_to_db, get_study_file_by_name, get_study_files_by_library_id, get_all_study_files
 from utils.prompts import highlight_prompt, evidence_based_prompt
 from utils.zotero_manager import ZoteroManager
 
@@ -39,8 +41,24 @@ openai.api_key = OPENAI_API_KEY
 # Initialize ChromaDB with study files
 add_study_files_to_chromadb("study_files.json", "study_files_collection")
 
+# Create sqlite study file data table
+create_db_and_tables()
+
+
 # Cache for RAG pipelines
 rag_cache = {}
+
+cache = LRUCache(maxsize=100)
+
+# with open("study_files.json", "w") as file:
+#     data_ = {}
+#     json.dump(data_, file, indent=4)
+
+def get_cache_value(key):
+    return cache.get(key)
+
+zotero_library_id = get_cache_value("zotero_library_id")
+logger.info(f"zotero_library_id: ======> {zotero_library_id}")
 
 
 def get_rag_pipeline(study_name: str) -> RAGPipeline:
@@ -61,18 +79,26 @@ def get_rag_pipeline(study_name: str) -> RAGPipeline:
     return rag_cache[study_name]
 
 
-def get_study_info(study_name: str) -> str:
+def get_study_info(study_name: str | list) -> str:
     """Retrieve information about the specified study."""
+    if isinstance(study_name, list):
+        study_name = study_name[0] if study_name else None
+    
+    if not study_name:
+        return "No study selected"
+    
+    study = get_study_file_by_name(study_name)
+    logger.info(f"Study: ======> {study}")
 
     collection = chromadb_client.get_or_create_collection("study_files_collection")
     result = collection.get(ids=[study_name])  # Query by study name (as a list)
-    logging.info(f"Result: ======> {result}")
+    logger.info(f"Result: ======> {result}")
 
     if not result or len(result["metadatas"]) == 0:
         raise ValueError(f"Invalid study name: {study_name}")
 
     study_file = result["metadatas"][0].get("file_path")
-    logging.info(f"study_file: =======> {study_file}")
+    logger.info(f"study_file: =======> {study_file}")
     if not study_file:
         raise ValueError(f"File path not found for study name: {study_name}")
 
@@ -116,9 +142,9 @@ def cleanup_temp_files():
                     try:
                         os.remove(file)
                     except Exception as e:
-                        logging.warning(f"Failed to remove temp file {file}: {e}")
+                        logger.warning(f"Failed to remove temp file {file}: {e}")
     except Exception as e:
-        logging.warning(f"Error during cleanup: {e}")
+        logger.warning(f"Error during cleanup: {e}")
 
 
 def chat_function(message: str, study_name: str, prompt_type: str) -> str:
@@ -128,7 +154,7 @@ def chat_function(message: str, study_name: str, prompt_type: str) -> str:
         return "Please enter a valid query."
 
     rag = get_rag_pipeline(study_name)
-    logging.info(f"rag: ==> {rag}")
+    logger.info(f"rag: ==> {rag}")
     prompt = {
         "Highlight": highlight_prompt,
         "Evidence-based": evidence_based_prompt,
@@ -139,12 +165,14 @@ def chat_function(message: str, study_name: str, prompt_type: str) -> str:
 
 
 def process_zotero_library_items(
-    zotero_library_id: str, zotero_api_access_key: str
+    zotero_library_id_param: str, zotero_api_access_key: str
 ) -> str:
-    if not zotero_library_id or not zotero_api_access_key:
+    global zotero_library_id
+    if not zotero_library_id_param or not zotero_api_access_key:
         return "Please enter your zotero library Id and API Access Key"
 
-    zotero_library_id = zotero_library_id
+    zotero_library_id = zotero_library_id_param
+    cache["zotero_library_id"] = zotero_library_id
     zotero_library_type = "user"  # or "group"
     zotero_api_access_key = zotero_api_access_key
 
@@ -192,10 +220,16 @@ def process_zotero_library_items(
 
                 # Update in-memory STUDY_FILES for reference in current session
                 STUDY_FILES.update({collection_name: f"data/{export_file}"})
-                logging.info(f"STUDY_FILES: {STUDY_FILES}")
+                logger.info(f"STUDY_FILES: {STUDY_FILES}")
 
         # After loop, add all collected data to ChromaDB
         add_study_files_to_chromadb("study_files.json", "study_files_collection")
+        # Add collected data to sqlite
+        add_study_files_to_db("study_files.json", zotero_library_id)
+
+        # Dynamically update study choices
+        global study_choices
+        study_choices = [file.name for file in get_study_files_by_library_id([zotero_library_id])]
         message = "Successfully processed items in your zotero library"
     except Exception as e:
         message = f"Error process your zotero library: {str(e)}"
@@ -203,11 +237,25 @@ def process_zotero_library_items(
     return message
 
 
+def refresh_study_choices():
+    """
+    Refresh study choices for a specific dropdown instance.
+    
+    :return: Updated Dropdown with current study choices
+    """
+    global study_choices
+    zotero_library_id = get_cache_value("zotero_library_id")
+    logger.info(f"zotero_library_id: ====> {zotero_library_id}")
+    study_choices = [file.name for file in get_study_files_by_library_id([zotero_library_id])]
+    logger.info(f"Study choices: ====> {study_choices}")
+    return study_choices
+
+
 def process_multi_input(text, study_name, prompt_type):
     # Split input based on commas and strip any extra spaces
     variable_list = [word.strip().upper() for word in text.split(",")]
     user_message = f"Extract and present in a tabular format the following variables for each {study_name} study: {', '.join(variable_list)}"
-    logging.info(f"User message: ==> {user_message}")
+    logger.info(f"User message: ==> {user_message}")
     response = chat_function(user_message, study_name, prompt_type)
     return [response, gr.update(visible=True)]
 
@@ -311,7 +359,8 @@ def chat_response(
 
 def create_gr_interface() -> gr.Blocks:
     """Create and configure the Gradio interface for the RAG platform."""
-    with gr.Blocks() as demo:
+    global zotero_library_id
+    with gr.Blocks(theme=gr.themes.Base()) as demo:
         gr.Markdown("# ACRES RAG Platform")
 
         with gr.Tabs() as tabs:
@@ -320,7 +369,7 @@ def create_gr_interface() -> gr.Blocks:
                 with gr.Row():
                     with gr.Column(scale=1):
                         gr.Markdown("### Zotero Credentials")
-                        zotero_library_id = gr.Textbox(
+                        zotero_library_id_param = gr.Textbox(
                             label="Zotero Library ID",
                             type="password",
                             placeholder="Enter Your Zotero Library ID here...",
@@ -346,11 +395,24 @@ def create_gr_interface() -> gr.Blocks:
                             if all_documents
                         ]
 
+                        print(f"zotero_library_id: {zotero_library_id_param.value}")
+                        zotero_library_id = zotero_library_id_param.value
+                        if zotero_library_id is None:
+                            zotero_library_id = get_cache_value("zotero_library_id")
+                        logger.info(f"zotero_library_id: =====> {zotero_library_id}")
+                        study_choices_db = get_study_files_by_library_id([zotero_library_id])
+                        logger.info(f"study_choices_db: =====> {study_choices_db}")
+                        study_files = get_all_study_files()
+                        logger.info(f"study_files: =====> {study_files}")
+
                         study_dropdown = gr.Dropdown(
                             choices=study_choices,
                             label="Select Study",
                             value=(study_choices[0] if study_choices else None),
                         )
+                        # In Gradio interface setup
+                        refresh_button = gr.Button("Refresh Studies")
+
                         study_info = gr.Markdown(label="Study Details")
                         prompt_type = gr.Radio(
                             ["Default", "Highlight", "Evidence-based"],
@@ -420,7 +482,7 @@ def create_gr_interface() -> gr.Blocks:
         # Event handlers for Study Analysis tab
         process_zotero_btn.click(
             process_zotero_library_items,
-            inputs=[zotero_library_id, zotero_api_access_key],
+            inputs=[zotero_library_id_param, zotero_api_access_key],
             outputs=[zotero_output],
         )
 
@@ -437,6 +499,11 @@ def create_gr_interface() -> gr.Blocks:
         download_btn.click(
             fn=download_as_csv, inputs=[answer_output], outputs=[download_btn]
         ).then(fn=cleanup_temp_files, inputs=None, outputs=None)
+
+        refresh_button.click(
+            fn=refresh_study_choices, 
+            outputs=[study_dropdown]  # Update the same dropdown
+        )
 
         # Event handlers for PDF Chat tab
 
