@@ -1,9 +1,0 @@
-[deploy]
-bucket = 'dev-acres-gradio-bucket'
-region = 'us-east-1'
-stack_name = 'AcresRag'
-
-[parameters]
-ContainerImageGradio = '224427659724.dkr.ecr.us-east-1.amazonaws.com/gradio-app-prod:latest'
-ContainerImageFastAPI = '224427659724.dkr.ecr.us-east-1.amazonaws.com/fastapi-api-prod:latest'
-CertificateArn = 'arn:aws:acm:us-east-1:224427659724:certificate/37ae35a9-60d1-4ff2-8afc-07f0d6000e75'

@@ -6,7 +6,7 @@ docker run -it -p 7860:7860 --rm --name gradio --network=gradio-fastapi-network 
 
 
 export AWS_DEFAULT_REGION=us-east-1
-export AWS_ACCOUNT_ID=224427659724
+export AWS_ACCOUNT_ID=2244276xxxxx
 aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
 
 aws ecr create-repository \
@@ -29,8 +29,10 @@ aws ecr create-repository \
 export ECR_BACKEND_GRADIO_URL="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/gradio-app-prod"
 echo $ECR_BACKEND_GRADIO_URL
 
-
+docker build --build-arg AWS_ACCOUNT_ID=2244276xxxxx -t your-image-name .
 docker build -f Dockerfile.gradio.prod -t gradio-app-prod .
+
+docker build --build-arg AWS_ACCOUNT_ID=$AWS_ACCOUNT_ID -f Dockerfile.gradio.prod -t gradio-app-prod .
 docker tag gradio-app-prod:latest "${ECR_BACKEND_GRADIO_URL}:latest"
 docker push "${ECR_BACKEND_GRADIO_URL}:latest"
 
@@ -49,21 +51,3 @@ docker build -f Dockerfile.api.prod -t fastapi-api-prod .
 docker tag fastapi-api-prod:latest "${ECR_BACKEND_FASTAPI_URL}:latest"
 docker push "${ECR_BACKEND_FASTAPI_URL}:latest"
 
-
-Now how can I configure the two load balancers such that I can just access them without providing the ports
-
-fastapi
-
-
-```
-http://dev-acres-fastapi-alb-1793670355.us-east-1.elb.amazonaws.com:8000/
-```
-
-http://dev-acres-gradio-alb-1860302806.us-east-1.elb.amazonaws.com/
-
-gradio
-
-
-```
-http://dev-acres-gradio-alb-1860302806.us-east-1.elb.amazonaws.com:7860/
-```
