@@ -177,3 +177,5 @@ data/
 study_export_*
 study_files.db
 study_files.json
+
+infra/ecs_config_new.toml
