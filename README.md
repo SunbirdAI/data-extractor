@@ -89,7 +89,7 @@ Browse the application with the link `http://localhost:7860/`
 
 Install and configure the AWS CLI and aws credentials. See [link](https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-welcome.html)
 
-OR: See the pdf document [here](./aws-cli.pdf)
+OR: See the pdf document [here](https://docs.aws.amazon.com/pdfs/cli/latest/userguide/aws-cli.pdf#getting-started-quickstart)
 
 Now follow the steps below to deploy to AWS ECS
 
