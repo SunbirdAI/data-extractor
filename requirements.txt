@@ -1,6 +1,7 @@
-chromadb==0.5.5
-fastapi==0.112.2
+chromadb
+fastapi
 gradio
+gradio_client
 llama-index
 llama-index-vector-stores-chroma
 nest-asyncio==1.6.0
@@ -11,4 +12,6 @@ python-dotenv
 pyzotero
 python-slugify
 PyMuPDF==1.23.8  
-Pillow==10.2.0 
+Pillow==10.2.0
+sqlmodel
+cachetools

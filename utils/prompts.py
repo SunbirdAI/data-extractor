@@ -1,9 +1,10 @@
 # utils/prompts.py
 
+from typing import List, Optional
+
 from llama_index.core import PromptTemplate
-from typing import Optional, List
-from pydantic import BaseModel, Field
 from llama_index.core.prompts import PromptTemplate
+from pydantic import BaseModel, Field
 
 
 class StudyCharacteristics(BaseModel):

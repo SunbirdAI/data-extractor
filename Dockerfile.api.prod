@@ -1,0 +1,72 @@
+###########
+# BUILDER #
+###########
+
+ARG AWS_ACCOUNT_ID
+
+# pull official base image
+FROM ${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/gradio-python:3.11.10-slim as builder
+
+# set work directory
+WORKDIR /app
+
+# set environment variables
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONUNBUFFERED 1
+ENV OMP_NUM_THREADS=1
+
+
+# install dependencies
+RUN apt-get update \
+    && apt-get -y install libpq-dev gcc \
+    && pip install psycopg
+
+RUN pip install --upgrade pip
+COPY ./requirements.txt /app/requirements.txt
+RUN pip wheel --no-cache-dir --no-deps --wheel-dir /app/wheels -r requirements.txt
+
+#########
+# FINAL #
+#########
+
+ARG AWS_ACCOUNT_ID
+
+# pull official base image
+FROM ${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/gradio-python:3.11.10-slim
+
+# create directory for the app user
+RUN mkdir -p /home/backend-app
+
+# create the app user
+RUN addgroup --system app && adduser --system --group app
+
+# create the appropriate directories
+ENV HOME=/home/app
+ENV BACKEND_APP_HOME=/home/app
+# RUN mkdir $BACKEND_APP_HOME
+WORKDIR $BACKEND_APP_HOME
+
+# install dependencies
+RUN apt-get update \
+    && apt-get -y install libpq-dev gcc \
+    && pip install psycopg
+
+COPY --from=builder /app/wheels /wheels
+COPY --from=builder /app/requirements.txt .
+RUN pip install --upgrade pip
+RUN pip install --no-cache /wheels/*
+
+# copy project
+COPY . $BACKEND_APP_HOME
+
+# chown all the files to the app user
+RUN chown -R app:app $BACKEND_APP_HOME
+
+# change to the app user
+USER app
+
+## Expose port
+EXPOSE 8000
+
+# Command to run the FastAPI app
+CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]

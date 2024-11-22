@@ -1,0 +1,7 @@
+[deploy]
+bucket = 'dev-acres-gradio-bucket'
+region = 'us-east-1'
+stack_name = 'AcresRag'
+
+[parameters]
+ContainerImageGradio = '224427659xxxx.dkr.ecr.us-east-1.amazonaws.com/gradio-app-prod:latest'

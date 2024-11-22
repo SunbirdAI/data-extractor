@@ -1,0 +1,19 @@
+# FastAPI Dockerfile
+FROM python:3.11.10-slim
+
+ENV PYTHONUNBUFFERED=1
+ENV OMP_NUM_THREADS=1
+
+# Set working directory
+WORKDIR /app
+
+# Copy app files
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+
+# Expose port
+EXPOSE 8000
+
+# Command to run the FastAPI app
+CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]

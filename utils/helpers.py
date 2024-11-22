@@ -1,18 +1,18 @@
 # utils/helpers.py
 
-from typing import Dict, Any
-from llama_index.core import Response
-from typing import List
-from rag.rag_pipeline import RAGPipeline
-from utils.prompts import (
-    structured_follow_up_prompt,
-    VaccineCoverageVariables,
-    StudyCharacteristics,
-)
 import json
-import json
+from typing import Any, Dict, List
+
 import chromadb
 from chromadb.api.types import Document
+from llama_index.core import Response
+
+from rag.rag_pipeline import RAGPipeline
+from utils.prompts import (
+    StudyCharacteristics,
+    VaccineCoverageVariables,
+    structured_follow_up_prompt,
+)
 
 # Initialize ChromaDB client
 chromadb_client = chromadb.Client()
