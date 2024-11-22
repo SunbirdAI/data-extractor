@@ -3,17 +3,17 @@ PDF processing module for ACRES RAG Platform.
 Handles PDF file processing, text extraction, and page rendering.
 """
 
+import datetime
+import json
+import logging
 # utils/pdf_processor.py
 import os
-import fitz
-import logging
-from typing import Dict, List, Optional
-import datetime
-from slugify import slugify
-import json
-from PIL import Image
 import re
+from typing import Dict, List, Optional
 
+import fitz
+from PIL import Image
+from slugify import slugify
 
 logger = logging.getLogger(__name__)
 

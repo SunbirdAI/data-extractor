@@ -1,0 +1,581 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Deploy Gradio and FastAPI services on AWS ECS Fargate
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, prod]
+  
+  # VPC Configuration
+  VpcCIDR:
+    Type: String
+    Default: 10.0.0.0/16
+  PublicSubnet1CIDR:
+    Type: String
+    Default: 10.0.1.0/24
+  PublicSubnet2CIDR:
+    Type: String
+    Default: 10.0.2.0/24
+  
+  # ECS Configuration
+  ECSClusterName:
+    Type: String
+    Default: rag-ecs-cluster
+  GradioTaskDefinitionCPU:
+    Type: Number
+    Default: 512
+  GradioTaskDefinitionMemory:
+    Type: Number 
+    Default: 1024
+  FastAPITaskDefinitionCPU:
+    Type: Number
+    Default: 256
+  FastAPITaskDefinitionMemory: 
+    Type: Number
+    Default: 512
+  
+  # Container Images
+  ContainerImageGradio:
+    Type: String
+    Description: URI of the Gradio container image in ECR
+  ContainerImageFastAPI:
+    Type: String
+    Description: URI of the FastAPI container image in ECR
+  # CertificateArn:
+  #   Type: String
+
+Resources:
+  # VPC and Networking
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCIDR
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-acres-vpc
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-acres-igw
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Ref PublicSubnet1CIDR
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-acres-public-subnet-1
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: !Ref PublicSubnet2CIDR
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-acres-public-subnet-2
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-acres-public-rt
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  # Security Groups
+  GradioSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Gradio service
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 7860
+          ToPort: 7860
+          CidrIp: 0.0.0.0/0
+          Description: INTERNET HTTPS
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: INTERNET HTTP
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+  
+  FastAPISecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for FastAPI service
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          CidrIp: 0.0.0.0/0
+          Description: INTERNET HTTPS
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: INTERNET HTTP
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+
+  # IAM Roles and Policies
+  # Gradio Execution Role - for pulling images and logging
+  GradioTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: GradioExecutionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: 
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/${Environment}-acres-gradio:*
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/${Environment}-acres-gradio:log-stream:*
+
+  # Gradio Task Role - for runtime permissions
+  GradioTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: GradioTaskPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Add specific permissions needed by your Gradio application at runtime
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource: !Sub arn:aws:s3:::${Environment}-acres-gradio-bucket/*
+  
+  # FastAPI Execution Role - for pulling images and logging
+  FastAPITaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: FastAPIExecutionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: 
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/${Environment}-acres-fastapi:*
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/${Environment}-acres-fastapi:log-stream:*
+  
+  # FastAPI Task Role - for runtime permissions
+  FastAPITaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: FastAPITaskPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Add specific permissions needed by your FastAPI application at runtime
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:Query
+                Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Environment}-acres-fastapi-table
+              # Allow FastAPI to make HTTP calls to Gradio service
+              - Effect: Allow
+                Action:
+                  - execute-api:Invoke
+                Resource: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:*
+
+  # ECS Cluster
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Ref ECSClusterName
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Load Balancer for Gradio
+  GradioALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub ${Environment}-acres-gradio-alb
+      Scheme: internet-facing
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: '60'
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      SecurityGroups:
+        - !Ref GradioSecurityGroup
+
+  GradioTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckEnabled: true
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: /
+      HealthCheckPort: 7860
+      HealthCheckTimeoutSeconds: 20
+      HealthyThresholdCount: 2
+      Name: !Sub ${Environment}-acres-gradio-tg
+      Port: 7860
+      Protocol: HTTP
+      TargetType: ip
+      UnhealthyThresholdCount: 5
+      VpcId: !Ref VPC
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
+
+  GradioHTTPSListener:
+    # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-elasticloadbalancingv2-listener.html
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref GradioTargetGroup
+      LoadBalancerArn: !Ref GradioALB
+      # Certificates:
+      #   - CertificateArn: !Ref CertificateArn
+      Port: 7860
+      Protocol: HTTP
+  # GradioHTTPListener:
+  #   # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-elasticloadbalancingv2-listener.html
+  #   Type: AWS::ElasticLoadBalancingV2::Listener
+  #   Properties:
+  #     Protocol: HTTP
+  #     Port: 80
+  #     LoadBalancerArn: !Ref GradioALB
+  #     DefaultActions:
+  #       - Type: redirect
+  #         RedirectConfig:
+  #           Protocol: "HTTPS"
+  #           Port: 7860
+  #           Host: "#{host}"
+  #           Path: "/#{path}"
+  #           Query: "#{query}"
+  #           StatusCode: "HTTP_301"
+  
+  # Load Balancer for FastAPI
+  FastAPIALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub ${Environment}-acres-fastapi-alb
+      Scheme: internet-facing
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: '60'
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      SecurityGroups:
+        - !Ref FastAPISecurityGroup
+
+  FastAPITargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckEnabled: true
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: /docs  # FastAPI's Swagger UI path
+      HealthCheckPort: 8000
+      HealthCheckTimeoutSeconds: 20
+      HealthyThresholdCount: 2
+      Name: !Sub ${Environment}-acres-fastapi-tg
+      Port: 8000
+      Protocol: HTTP
+      TargetType: ip
+      UnhealthyThresholdCount: 5
+      VpcId: !Ref VPC
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
+
+  FastAPIHTTPSListener:
+    # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-elasticloadbalancingv2-listener.html
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref FastAPITargetGroup
+      LoadBalancerArn: !Ref FastAPIALB
+      # Certificates:
+      #   - CertificateArn: !Ref CertificateArn
+      Port: 8000
+      Protocol: HTTP
+  # FastAPIHTTPListener:
+  #   # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-elasticloadbalancingv2-listener.html
+  #   Type: AWS::ElasticLoadBalancingV2::Listener
+  #   Properties:
+  #     Protocol: HTTP
+  #     Port: 80
+  #     LoadBalancerArn: !Ref FastAPIALB
+  #     DefaultActions:
+  #       - Type: redirect
+  #         RedirectConfig:
+  #           Protocol: "HTTPS"
+  #           Port: 8000
+  #           Host: "#{host}"
+  #           Path: "/#{path}"
+  #           Query: "#{query}"
+  #           StatusCode: "HTTP_301"
+
+  # ECS Task Definitions
+  GradioTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${Environment}-acres-gradio
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: !Ref GradioTaskDefinitionCPU
+      Memory: !Ref GradioTaskDefinitionMemory
+      NetworkMode: awsvpc
+      ExecutionRoleArn: !GetAtt GradioTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt GradioTaskRole.Arn
+      ContainerDefinitions:
+        - Name: gradio
+          Image: !Ref ContainerImageGradio
+          PortMappings:
+            - ContainerPort: 7860
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref GradioLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: gradio
+  
+  FastAPITaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${Environment}-acres-fastapi
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: !Ref FastAPITaskDefinitionCPU
+      Memory: !Ref FastAPITaskDefinitionMemory
+      NetworkMode: awsvpc
+      ExecutionRoleArn: !GetAtt FastAPITaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt FastAPITaskRole.Arn
+      ContainerDefinitions:
+        - Name: fastapi
+          Image: !Ref ContainerImageFastAPI
+          PortMappings:
+            - ContainerPort: 8000
+          Environment:
+            - Name: GRADIO_URL
+              Value: !Sub http://${GradioALB.DNSName}:7860/
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref FastAPILogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: fastapi
+
+  # CloudWatch Log Groups
+  GradioLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/${Environment}-acres-gradio
+      RetentionInDays: 30
+  
+  FastAPILogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/${Environment}-acres-fastapi
+      RetentionInDays: 30
+
+
+  # ECS Services
+  GradioService:
+    Type: AWS::ECS::Service
+    DependsOn: 
+      - GradioHTTPSListener
+      # - GradioHTTPListener
+    Properties:
+      ServiceName: !Sub ${Environment}-acres-gradio
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref GradioTaskDefinition
+      DesiredCount: 1
+      LaunchType: FARGATE
+      HealthCheckGracePeriodSeconds: 180
+      LoadBalancers:
+        - ContainerName: gradio
+          ContainerPort: 7860
+          TargetGroupArn: !Ref GradioTargetGroup
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !Ref GradioSecurityGroup
+          Subnets:
+            - !Ref PublicSubnet1
+            - !Ref PublicSubnet2
+      DeploymentConfiguration:
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+  
+  FastAPIService:
+    Type: AWS::ECS::Service
+    DependsOn: 
+      - GradioService
+      - FastAPIHTTPSListener
+      # - FastAPIHTTPListener
+    Properties:
+      ServiceName: !Sub ${Environment}-acres-fastapi
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref FastAPITaskDefinition
+      DesiredCount: 1
+      LaunchType: FARGATE
+      HealthCheckGracePeriodSeconds: 180
+      LoadBalancers:
+        - ContainerName: fastapi
+          ContainerPort: 8000
+          TargetGroupArn: !Ref FastAPITargetGroup
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !Ref FastAPISecurityGroup
+          Subnets:
+            - !Ref PublicSubnet1
+            - !Ref PublicSubnet2
+      DeploymentConfiguration:
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+      # Add deployment controller for better rollout control
+      DeploymentController:
+        Type: ECS
+
+Outputs:
+  VpcId:
+    Description: VPC ID
+    Value: !Ref VPC
+
+  PublicSubnet1:
+    Description: Public Subnet 1
+    Value: !Ref PublicSubnet1
+
+  PublicSubnet2:
+    Description: Public Subnet 2
+    Value: !Ref PublicSubnet2
+
+  GradioServiceUrl:
+    Description: URL for the Gradio service
+    Value: !Sub http://${GradioALB.DNSName}:7860/
+
+  ECSClusterName:
+    Description: Name of the ECS cluster
+    Value: !Ref ECSCluster
+
+  GradioServiceName:
+    Description: Name of the Gradio service
+    Value: !GetAtt GradioService.Name
+  
+  FastAPIServiceName:
+    Description: Name of the FastAPI service
+    Value: !GetAtt FastAPIService.Name
+  
+  FastAPIServiceUrl:
+    Description: URL for the FastAPI service
+    Value: !Sub http://${FastAPIALB.DNSName}:8000/
