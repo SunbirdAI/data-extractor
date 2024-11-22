@@ -1,18 +1,18 @@
 # utils/helpers.py
 
-from typing import Dict, Any
-from llama_index.core import Response
-from typing import List
-from rag.rag_pipeline import RAGPipeline
-from utils.prompts import (
-    structured_follow_up_prompt,
-    VaccineCoverageVariables,
-    StudyCharacteristics,
-)
 import json
-import json
+from typing import Any, Dict, List
+
 import chromadb
 from chromadb.api.types import Document
+from llama_index.core import Response
+
+from rag.rag_pipeline import RAGPipeline
+from utils.prompts import (
+    StudyCharacteristics,
+    VaccineCoverageVariables,
+    structured_follow_up_prompt,
+)
 
 # Initialize ChromaDB client
 chromadb_client = chromadb.Client()
@@ -88,7 +88,7 @@ def append_to_study_files(file_path, new_key, new_value):
             "Gene Xpert": "data/gene_xpert_zotero_items.json"
         }
     """
-    try: 
+    try:
         # Read the existing data from the file
         with open(file_path, "r") as file:
             data = json.load(file)

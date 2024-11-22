@@ -1,35 +1,38 @@
 # app.py
 
 import csv
-
 import datetime
-
 # from datetime import datetime
 import io
 import json
 import logging
 import os
-from typing import Tuple, List, Any
+from typing import Any, List, Tuple
 
 import gradio as gr
 import openai
+from cachetools import LRUCache
 from dotenv import load_dotenv
 from slugify import slugify
-from cachetools import LRUCache
 
-from config import STUDY_FILES, OPENAI_API_KEY
+from config import OPENAI_API_KEY, STUDY_FILES
+from interface import create_chat_interface
 from rag.rag_pipeline import RAGPipeline
+from utils.db import (
+    add_study_files_to_db,
+    create_db_and_tables,
+    get_all_study_files,
+    get_study_file_by_name,
+    get_study_files_by_library_id,
+)
 from utils.helpers import (
-    append_to_study_files,
     add_study_files_to_chromadb,
+    append_to_study_files,
     chromadb_client,
 )
-from utils.db import create_db_and_tables, add_study_files_to_db, get_study_file_by_name, get_study_files_by_library_id, get_all_study_files
-from utils.prompts import highlight_prompt, evidence_based_prompt
-from utils.zotero_manager import ZoteroManager
-
-from interface import create_chat_interface
 from utils.pdf_processor import PDFProcessor
+from utils.prompts import evidence_based_prompt, highlight_prompt
+from utils.zotero_manager import ZoteroManager
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -54,11 +57,13 @@ cache = LRUCache(maxsize=100)
 #     data_ = {}
 #     json.dump(data_, file, indent=4)
 
+
 def get_cache_value(key):
     return cache.get(key)
 
+
 zotero_library_id = get_cache_value("zotero_library_id")
-logger.info(f"zotero_library_id: ======> {zotero_library_id}")
+logger.info(f"zotero_library_id: {zotero_library_id}")
 
 
 def get_rag_pipeline(study_name: str) -> RAGPipeline:
@@ -83,22 +88,22 @@ def get_study_info(study_name: str | list) -> str:
     """Retrieve information about the specified study."""
     if isinstance(study_name, list):
         study_name = study_name[0] if study_name else None
-    
+
     if not study_name:
         return "No study selected"
-    
+
     study = get_study_file_by_name(study_name)
-    logger.info(f"Study: ======> {study}")
+    logger.info(f"Study: {study}")
 
     collection = chromadb_client.get_or_create_collection("study_files_collection")
     result = collection.get(ids=[study_name])  # Query by study name (as a list)
-    logger.info(f"Result: ======> {result}")
+    logger.info(f"Result: {result}")
 
     if not result or len(result["metadatas"]) == 0:
         raise ValueError(f"Invalid study name: {study_name}")
 
     study_file = result["metadatas"][0].get("file_path")
-    logger.info(f"study_file: =======> {study_file}")
+    logger.info(f"study_file: {study_file}")
     if not study_file:
         raise ValueError(f"File path not found for study name: {study_name}")
 
@@ -154,7 +159,7 @@ def chat_function(message: str, study_name: str, prompt_type: str) -> str:
         return "Please enter a valid query."
 
     rag = get_rag_pipeline(study_name)
-    logger.info(f"rag: ==> {rag}")
+    logger.info(f"rag: {rag}")
     prompt = {
         "Highlight": highlight_prompt,
         "Evidence-based": evidence_based_prompt,
@@ -229,7 +234,9 @@ def process_zotero_library_items(
 
         # Dynamically update study choices
         global study_choices
-        study_choices = [file.name for file in get_study_files_by_library_id([zotero_library_id])]
+        study_choices = [
+            file.name for file in get_study_files_by_library_id([zotero_library_id])
+        ]
         message = "Successfully processed items in your zotero library"
     except Exception as e:
         message = f"Error process your zotero library: {str(e)}"
@@ -240,14 +247,16 @@ def process_zotero_library_items(
 def refresh_study_choices():
     """
     Refresh study choices for a specific dropdown instance.
-    
+
     :return: Updated Dropdown with current study choices
     """
     global study_choices
     zotero_library_id = get_cache_value("zotero_library_id")
-    logger.info(f"zotero_library_id: ====> {zotero_library_id}")
-    study_choices = [file.name for file in get_study_files_by_library_id([zotero_library_id])]
-    logger.info(f"Study choices: ====> {study_choices}")
+    logger.info(f"zotero_library_id: {zotero_library_id}")
+    study_choices = [
+        file.name for file in get_study_files_by_library_id([zotero_library_id])
+    ]
+    logger.info(f"Study choices: {study_choices}")
     return study_choices
 
 
@@ -255,7 +264,7 @@ def process_multi_input(text, study_name, prompt_type):
     # Split input based on commas and strip any extra spaces
     variable_list = [word.strip().upper() for word in text.split(",")]
     user_message = f"Extract and present in a tabular format the following variables for each {study_name} study: {', '.join(variable_list)}"
-    logger.info(f"User message: ==> {user_message}")
+    logger.info(f"User message: {user_message}")
     response = chat_function(user_message, study_name, prompt_type)
     return [response, gr.update(visible=True)]
 
@@ -400,7 +409,9 @@ def create_gr_interface() -> gr.Blocks:
                         if zotero_library_id is None:
                             zotero_library_id = get_cache_value("zotero_library_id")
                         logger.info(f"zotero_library_id: =====> {zotero_library_id}")
-                        study_choices_db = get_study_files_by_library_id([zotero_library_id])
+                        study_choices_db = get_study_files_by_library_id(
+                            [zotero_library_id]
+                        )
                         logger.info(f"study_choices_db: =====> {study_choices_db}")
                         study_files = get_all_study_files()
                         logger.info(f"study_files: =====> {study_files}")
@@ -501,8 +512,8 @@ def create_gr_interface() -> gr.Blocks:
         ).then(fn=cleanup_temp_files, inputs=None, outputs=None)
 
         refresh_button.click(
-            fn=refresh_study_choices, 
-            outputs=[study_dropdown]  # Update the same dropdown
+            fn=refresh_study_choices,
+            outputs=[study_dropdown],  # Update the same dropdown
         )
 
         # Event handlers for PDF Chat tab

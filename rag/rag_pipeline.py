@@ -1,19 +1,15 @@
 # rag/rag_pipeline.py
 import json
 import logging
-from typing import Dict, Any, List
+import re
+from typing import Any, Dict, List, Optional, Tuple
 
-from llama_index.core import Document, VectorStoreIndex
-from llama_index.core.node_parser import SentenceWindowNodeParser, SentenceSplitter
-from llama_index.core import PromptTemplate
+import chromadb
+from llama_index.core import Document, PromptTemplate, VectorStoreIndex
+from llama_index.core.node_parser import SentenceSplitter, SentenceWindowNodeParser
 from llama_index.embeddings.openai import OpenAIEmbedding
 from llama_index.llms.openai import OpenAI
 from llama_index.vector_stores.chroma import ChromaVectorStore
-import chromadb
-from typing import Dict, Any, List, Tuple, Optional
-import re
-import logging
-
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -171,7 +167,6 @@ class RAGPipeline:
         requested_page = (
             self.extract_page_number_from_query(context) if self.is_pdf else None
         )
-
 
         # This is a hack to index all the documents in the store :)
         n_documents = len(self.index.docstore.docs)
