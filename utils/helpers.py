@@ -195,6 +195,9 @@ def add_study_files_to_chromadb(file_path: str, collection_name: str):
         print(f"File '{file_path}' not found.")
         return
 
+    if not study_files_data:
+        return
+
     # Get or create the collection in ChromaDB
     collection = chromadb_client.get_or_create_collection(collection_name)
 

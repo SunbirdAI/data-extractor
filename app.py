@@ -63,7 +63,7 @@ def get_cache_value(key):
 
 
 zotero_library_id = get_cache_value("zotero_library_id")
-logger.info(f"zotero_library_id: {zotero_library_id}")
+logger.info(f"zotero_library_id cache: {zotero_library_id}")
 
 
 def get_rag_pipeline(study_name: str) -> RAGPipeline:
@@ -95,14 +95,14 @@ def get_study_info(study_name: str | list) -> str:
     study = get_study_file_by_name(study_name)
     logger.info(f"Study: {study}")
 
-    collection = chromadb_client.get_or_create_collection("study_files_collection")
-    result = collection.get(ids=[study_name])  # Query by study name (as a list)
-    logger.info(f"Result: {result}")
+    # collection = chromadb_client.get_or_create_collection("study_files_collection")
+    # result = collection.get(ids=[study_name])  # Query by study name (as a list)
+    # logger.info(f"Result: {result}")
 
-    if not result or len(result["metadatas"]) == 0:
+    if not study:
         raise ValueError(f"Invalid study name: {study_name}")
 
-    study_file = result["metadatas"][0].get("file_path")
+    study_file = study.file_path
     logger.info(f"study_file: {study_file}")
     if not study_file:
         raise ValueError(f"File path not found for study name: {study_name}")
@@ -244,20 +244,34 @@ def process_zotero_library_items(
     return message
 
 
+process_zotero_library_items(
+    os.getenv("ZOTERO_LIBRARY_ID"), os.getenv("ZOTERO_API_ACCESS_KEY")
+)
+
+
 def refresh_study_choices():
     """
     Refresh study choices for a specific dropdown instance.
 
     :return: Updated Dropdown with current study choices
     """
-    global study_choices
+    global study_choices, zotero_library_id
     zotero_library_id = get_cache_value("zotero_library_id")
-    logger.info(f"zotero_library_id: {zotero_library_id}")
+    logger.info(f"zotero_library_id refreshed: {zotero_library_id}")
     study_choices = [
         file.name for file in get_study_files_by_library_id([zotero_library_id])
     ]
-    logger.info(f"Study choices: {study_choices}")
+    logger.info(f"Study choices refreshed: {study_choices}")
     return study_choices
+
+
+def new_study_choices():
+    """
+    Refresh study choices for a specific dropdown instance.
+    """
+    study_choices = refresh_study_choices()
+    study_choices = ", ".join(study_choices)
+    return f"**Your studies are: {study_choices}**"
 
 
 def process_multi_input(text, study_name, prompt_type):
@@ -369,6 +383,7 @@ def chat_response(
 def create_gr_interface() -> gr.Blocks:
     """Create and configure the Gradio interface for the RAG platform."""
     global zotero_library_id
+
     with gr.Blocks(theme=gr.themes.Base()) as demo:
         gr.Markdown("# ACRES RAG Platform")
 
@@ -391,45 +406,59 @@ def create_gr_interface() -> gr.Blocks:
                         process_zotero_btn = gr.Button("Process your Zotero Library")
                         zotero_output = gr.Markdown(label="Zotero")
 
-                        gr.Markdown("### Study Information")
-                        collection = chromadb_client.get_or_create_collection(
-                            "study_files_collection"
+                        local_storage_state = gr.BrowserState(
+                            {"zotero_library_id": "", "study_choices": []}
                         )
-                        all_documents = collection.query(
-                            query_texts=[""], n_results=1000
-                        )
-                        study_choices = [
-                            doc_id
-                            for doc_id in all_documents.get("ids")[0]
-                            if all_documents
-                        ]
 
-                        print(f"zotero_library_id: {zotero_library_id_param.value}")
+                        gr.Markdown("### Study Information")
+
                         zotero_library_id = zotero_library_id_param.value
                         if zotero_library_id is None:
                             zotero_library_id = get_cache_value("zotero_library_id")
                         logger.info(f"zotero_library_id: =====> {zotero_library_id}")
-                        study_choices_db = get_study_files_by_library_id(
-                            [zotero_library_id]
-                        )
-                        logger.info(f"study_choices_db: =====> {study_choices_db}")
-                        study_files = get_all_study_files()
-                        logger.info(f"study_files: =====> {study_files}")
+                        study_choices = refresh_study_choices()
+                        logger.info(f"study_choices_db: =====> {study_choices}")
 
                         study_dropdown = gr.Dropdown(
                             choices=study_choices,
                             label="Select Study",
                             value=(study_choices[0] if study_choices else None),
+                            allow_custom_value=True,
                         )
                         # In Gradio interface setup
                         refresh_button = gr.Button("Refresh Studies")
 
                         study_info = gr.Markdown(label="Study Details")
+                        new_studies = gr.Markdown(label="Your Studies")
                         prompt_type = gr.Radio(
                             ["Default", "Highlight", "Evidence-based"],
                             label="Prompt Type",
                             value="Default",
                         )
+
+                        @demo.load(
+                            inputs=[local_storage_state],
+                            outputs=[zotero_library_id_param],
+                        )
+                        def load_from_local_storage(saved_values):
+                            print("loading from local storage", saved_values)
+                            return saved_values.get("zotero_library_id")
+
+                        @gr.on(
+                            [
+                                zotero_library_id_param.change,
+                                process_zotero_btn.click,
+                                refresh_button.click,
+                            ],
+                            inputs=[zotero_library_id_param],
+                            outputs=[local_storage_state],
+                        )
+                        def save_to_local_storage(zotero_library_id_param):
+                            study_choices = refresh_study_choices()
+                            return {
+                                "zotero_library_id": zotero_library_id_param,
+                                "study_choices": study_choices,
+                            }
 
                     with gr.Column(scale=3):
                         gr.Markdown("### Study Variables")
@@ -512,8 +541,8 @@ def create_gr_interface() -> gr.Blocks:
         ).then(fn=cleanup_temp_files, inputs=None, outputs=None)
 
         refresh_button.click(
-            fn=refresh_study_choices,
-            outputs=[study_dropdown],  # Update the same dropdown
+            fn=new_study_choices,
+            outputs=[new_studies],  # Update the same dropdown
         )
 
         # Event handlers for PDF Chat tab
