@@ -376,7 +376,6 @@ def chat_response(
 def create_gr_interface() -> gr.Blocks:
     """Create and configure the Gradio interface for the RAG platform."""
     global zotero_library_id
-
     with gr.Blocks(theme=gr.themes.Base()) as demo:
         gr.Markdown("# ACRES RAG Platform")
 
