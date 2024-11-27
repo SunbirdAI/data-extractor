@@ -29,11 +29,14 @@ from utils.helpers import (
     add_study_files_to_chromadb,
     append_to_study_files,
     chromadb_client,
+    create_directory,
 )
 from utils.pdf_processor import PDFProcessor
 from utils.prompts import evidence_based_prompt, highlight_prompt
 from utils.zotero_manager import ZoteroManager
 
+data_directory = "data"
+create_directory(data_directory)
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -53,10 +56,6 @@ rag_cache = {}
 
 cache = LRUCache(maxsize=100)
 
-# with open("study_files.json", "w") as file:
-#     data_ = {}
-#     json.dump(data_, file, indent=4)
-
 
 def get_cache_value(key):
     return cache.get(key)
@@ -69,13 +68,13 @@ logger.info(f"zotero_library_id cache: {zotero_library_id}")
 def get_rag_pipeline(study_name: str) -> RAGPipeline:
     """Get or create a RAGPipeline instance for the given study by querying ChromaDB."""
     if study_name not in rag_cache:
-        collection = chromadb_client.get_or_create_collection("study_files_collection")
-        result = collection.get(ids=[study_name])  # Retrieve document by ID
+        study = get_study_file_by_name(study_name)
 
-        if not result or len(result["metadatas"]) == 0:
+        if not study:
             raise ValueError(f"Invalid study name: {study_name}")
 
-        study_file = result["metadatas"][0].get("file_path")
+        study_file = study.file_path
+        logger.info(f"study_file: {study_file}")
         if not study_file:
             raise ValueError(f"File path not found for study name: {study_name}")
 
@@ -94,10 +93,6 @@ def get_study_info(study_name: str | list) -> str:
 
     study = get_study_file_by_name(study_name)
     logger.info(f"Study: {study}")
-
-    # collection = chromadb_client.get_or_create_collection("study_files_collection")
-    # result = collection.get(ids=[study_name])  # Query by study name (as a list)
-    # logger.info(f"Result: {result}")
 
     if not study:
         raise ValueError(f"Invalid study name: {study_name}")
@@ -303,8 +298,6 @@ def download_as_csv(markdown_content):
 
 
 # PDF Support
-
-
 def process_pdf_uploads(files: List[gr.File], collection_name: str) -> str:
     """Process uploaded PDF files and add them to the system."""
     if not files or not collection_name:

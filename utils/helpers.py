@@ -1,6 +1,7 @@
 # utils/helpers.py
 
 import json
+import os
 from typing import Any, Dict, List
 
 import chromadb
@@ -216,6 +217,29 @@ def add_study_files_to_chromadb(file_path: str, collection_name: str):
     collection.add(ids=ids, documents=documents, metadatas=metadatas)
 
     print("All study files have been successfully added to ChromaDB.")
+
+
+def create_directory(directory_path):
+    """
+    Create a directory.
+    Does not raise an error if the directory already exists.
+
+    Args:
+        directory_path (str): Path of the directory to create
+
+    Returns:
+        bool: True if directory was created or already exists, False if creation failed
+    """
+    try:
+        # Use exist_ok=True to prevent error if directory exists
+        os.makedirs(directory_path, exist_ok=True)
+        return True
+    except PermissionError:
+        print(f"Permission denied: Cannot create directory {directory_path}")
+        return False
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+        return False
 
 
 if __name__ == "__main__":

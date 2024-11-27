@@ -60,6 +60,15 @@ gradio app.py
 
 Browse the application with the link `http://localhost:7860/`
 
+### Run the api
+Make sure the gradio app is running on port `7860` and then run the command below in another terminal tab in the same directory.
+
+```sh
+uvicorn api:app --reload
+```
+
+Browse the api at `http://localhost:8000/docs`
+
 
 ## Run with docker
 To run the application with docker locally, first make sure you have docker installed. See [link](https://docs.docker.com/)
@@ -83,6 +92,15 @@ docker run -it -p 7860:7860 --rm --name gradio --network=gradio-fastapi-network 
 ```
 
 Browse the application with the link `http://localhost:7860/`
+
+To run the api with docker run the commands below. The gradio container should be run first before running the api.
+
+```sh
+docker build -f Dockerfile.api -t fastapi-app .
+docker run -it -p 8000:8000 --rm --name fastapi --network=gradio-fastapi-network fastapi-app
+```
+
+Browse the api at `http://localhost:8000/docs`
 
 
 ## Deploy to AWS ECS (Elastic Container Service) with Fargate
@@ -147,6 +165,25 @@ echo $ECR_BACKEND_GRADIO_URL
 docker build --build-arg AWS_ACCOUNT_ID=$AWS_ACCOUNT_ID -f Dockerfile.gradio.prod -t gradio-app-prod .
 docker tag gradio-app-prod:latest "${ECR_BACKEND_GRADIO_URL}:latest"
 docker push "${ECR_BACKEND_GRADIO_URL}:latest"
+```
+
+- Now create fastapi repostory
+
+```sh
+aws ecr create-repository \
+  --repository-name fastapi-api-prod \
+  --image-tag-mutability MUTABLE
+
+export ECR_BACKEND_FASTAPI_URL="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/fastapi-api-prod"
+echo $ECR_BACKEND_FASTAPI_URL
+```
+
+- Build the docker image for the production and push to ECR
+
+```sh
+docker build -f Dockerfile.api.prod -t fastapi-api-prod .
+docker tag fastapi-api-prod:latest "${ECR_BACKEND_FASTAPI_URL}:latest"
+docker push "${ECR_BACKEND_FASTAPI_URL}:latest"
 ```
 
 ### Setup and Provision AWS ECS infra using AWS Cloudformation (IaC)
