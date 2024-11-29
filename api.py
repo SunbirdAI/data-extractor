@@ -67,7 +67,7 @@ class ZoteroCredentials(BaseModel):
 @app.post("/process_zotero_library_items", tags=["zotero"])
 def process_zotero_library_items(zotero_credentials: ZoteroCredentials):
     result = client.predict(
-        zotero_library_id=zotero_credentials.library_id,
+        zotero_library_id_param=zotero_credentials.library_id,
         zotero_api_access_key=zotero_credentials.api_access_key,
         api_name="/process_zotero_library_items",
     )
