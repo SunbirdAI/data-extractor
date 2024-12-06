@@ -2,8 +2,10 @@
 # BUILDER #
 ###########
 
+ARG AWS_ACCOUNT_ID
+
 # pull official base image
-FROM 224427659724.dkr.ecr.us-east-1.amazonaws.com/gradio-python:3.11.10-slim as builder
+FROM ${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/gradio-python:3.11.10-slim as builder
 
 # set work directory
 WORKDIR /app
@@ -27,8 +29,10 @@ RUN pip wheel --no-cache-dir --no-deps --wheel-dir /app/wheels -r requirements.t
 # FINAL #
 #########
 
+ARG AWS_ACCOUNT_ID
+
 # pull official base image
-FROM 224427659724.dkr.ecr.us-east-1.amazonaws.com/gradio-python:3.11.10-slim
+FROM ${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/gradio-python:3.11.10-slim
 
 # create directory for the app user
 RUN mkdir -p /home/backend-app

@@ -121,7 +121,7 @@ export AWS_ACCOUNT_ID=aws_account_id # ie. 2243838xxxxxx
 Login into the AWS ECR (Elastic Container Registry) via the commandline
 
 ```sh
-aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
 ```
 
 Create a python image and push to ECR. This image will be used as the base image for the application image deployed on AWS ECS.
@@ -181,7 +181,7 @@ echo $ECR_BACKEND_FASTAPI_URL
 - Build the docker image for the production and push to ECR
 
 ```sh
-docker build -f Dockerfile.api.prod -t fastapi-api-prod .
+docker build --build-arg AWS_ACCOUNT_ID=$AWS_ACCOUNT_ID -f Dockerfile.api.prod -t fastapi-api-prod .
 docker tag fastapi-api-prod:latest "${ECR_BACKEND_FASTAPI_URL}:latest"
 docker push "${ECR_BACKEND_FASTAPI_URL}:latest"
 ```
