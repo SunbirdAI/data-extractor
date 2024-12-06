@@ -221,3 +221,21 @@ Then look for the outputs to the link for the deployed application.
 chmod u+x bin/cfn/*
 ./bin/cfn/ecs-deploy
 ```
+
+#### Update Task Definition Deployments
+After making changes, build the docker images and then push to ECR.
+
+To update the task definition deployments, force the new deployment by running the commands below
+
+For the gradio task definition
+
+```sh
+./bin/cfn/ecs-deploy-update-gradio
+```
+
+For the api task definition
+
+```sh
+./bin/cfn/ecs-deploy-update-api
+```
+
