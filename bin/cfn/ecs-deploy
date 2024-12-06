@@ -22,4 +22,4 @@ aws cloudformation deploy \
   --tags group=acres-rag \
   --parameter-overrides $PARAMETERS \
   --capabilities CAPABILITY_NAMED_IAM \
-  --profile sunbirdai
+  --profile acres

@@ -1,10 +1,12 @@
 # rag/rag_pipeline.py
 import json
 import logging
+import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
 import chromadb
+from dotenv import load_dotenv
 from llama_index.core import Document, PromptTemplate, VectorStoreIndex
 from llama_index.core.node_parser import SentenceSplitter, SentenceWindowNodeParser
 from llama_index.embeddings.openai import OpenAIEmbedding
@@ -13,6 +15,8 @@ from llama_index.vector_stores.chroma import ChromaVectorStore
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+load_dotenv()
 
 
 class RAGPipeline:
@@ -28,7 +32,9 @@ class RAGPipeline:
         self.documents = None
         self.client = chromadb.Client()
         self.collection = self.client.get_or_create_collection(self.collection_name)
-        self.embedding_model = OpenAIEmbedding(model_name="text-embedding-ada-002")
+        self.embedding_model = OpenAIEmbedding(
+            model_name="text-embedding-ada-002", api_key=os.getenv("OPENAI_API_KEY")
+        )
         self.is_pdf = self._check_if_pdf_collection()
         self.load_documents()
         self.build_index()
@@ -175,7 +181,7 @@ class RAGPipeline:
             text_qa_template=prompt_template,
             similarity_top_k=n_documents if n_documents <= 17 else 15,
             response_mode="tree_summarize",
-            llm=OpenAI(model="gpt-4o-mini"),
+            llm=OpenAI(model="gpt-4o-mini", api_key=os.getenv("OPENAI_API_KEY")),
         )
 
         response = query_engine.query(context)
