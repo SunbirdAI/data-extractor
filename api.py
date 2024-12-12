@@ -5,6 +5,7 @@ from typing import List, Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from gradio_client import Client
 from pydantic import BaseModel, ConfigDict, Field, constr
@@ -15,14 +16,25 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+GRADIO_URL = os.getenv("GRADIO_URL", "http://localhost:7860/")
+logger.info(f"GRADIO_URL: {GRADIO_URL}")
+client = Client(GRADIO_URL)
+
 app = FastAPI(
     title="ACRES RAG API",
     description=description,
     openapi_tags=tags_metadata,
 )
-GRADIO_URL = os.getenv("GRADIO_URL", "http://localhost:7860/")
-logger.info(f"GRADIO_URL: {GRADIO_URL}")
-client = Client(GRADIO_URL)
+
+origins = ["*"]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class StudyVariables(str, Enum):
@@ -93,6 +105,12 @@ def process_study_variables(
     )
     print(type(result))
     return {"result": result[0]}
+
+
+@app.post("/new_study_choices", tags=["zotero"])
+def new_study_choices():
+    result = client.predict(api_name="/new_study_choices")
+    return {"result": result}
 
 
 @app.post("/download_csv", tags=["zotero"])
