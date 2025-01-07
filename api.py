@@ -1,7 +1,7 @@
 import logging
 import os
 from enum import Enum
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
@@ -50,7 +50,7 @@ class PromptType(str, Enum):
 
 
 class StudyVariableRequest(BaseModel):
-    study_variable: StudyVariables
+    study_variable: Union[StudyVariables, str]
     prompt_type: PromptType
     text: constr(min_length=1, strip_whitespace=True)  # type: ignore
 
