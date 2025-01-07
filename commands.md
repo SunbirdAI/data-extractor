@@ -47,7 +47,7 @@ aws ecr create-repository \
 export ECR_BACKEND_FASTAPI_URL="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/fastapi-api-prod"
 echo $ECR_BACKEND_FASTAPI_URL
 
-docker build -f Dockerfile.api.prod -t fastapi-api-prod .
+docker build --build-arg AWS_ACCOUNT_ID=$AWS_ACCOUNT_ID -f Dockerfile.api.prod -t fastapi-api-prod .
 docker tag fastapi-api-prod:latest "${ECR_BACKEND_FASTAPI_URL}:latest"
 docker push "${ECR_BACKEND_FASTAPI_URL}:latest"
 
