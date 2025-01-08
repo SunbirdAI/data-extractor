@@ -7,7 +7,7 @@ import io
 import json
 import logging
 import os
-from typing import Any, List, Tuple
+from typing import Any, List, Tuple, Union
 
 import gradio as gr
 import openai
@@ -83,7 +83,7 @@ def get_rag_pipeline(study_name: str) -> RAGPipeline:
     return rag_cache[study_name]
 
 
-def get_study_info(study_name: str | list) -> str:
+def get_study_info(study_name: Union[str, list]) -> str:
     """Retrieve information about the specified study."""
     if isinstance(study_name, list):
         study_name = study_name[0] if study_name else None
@@ -546,18 +546,24 @@ def create_gr_interface() -> gr.Blocks:
                 return "Please select PDF files", None
 
             try:
-                result = process_pdf_uploads(files, name)
+                processor = PDFProcessor()
+                # Process PDFs
+                output_path = processor.process_pdfs(files, name)
                 collection_id = f"pdf_{slugify(name)}"
-                return result, collection_id
+                
+                # Add to study files JSON
+                append_to_study_files("study_files.json", collection_id, output_path)
+                
+                # Add to ChromaDB
+                add_study_files_to_chromadb("study_files.json", "study_files_collection")
+                
+                # Add to SQLite database - this is the crucial missing step
+                add_study_files_to_db("study_files.json", "local")  # Add library_id parameter
+                
+                return f"Successfully processed PDFs into collection: {collection_id}", collection_id
             except Exception as e:
                 logger.error(f"Error in handle_pdf_upload: {str(e)}")
                 return f"Error: {str(e)}", None
-
-        upload_btn.click(
-            handle_pdf_upload,
-            inputs=[pdf_files, collection_name],
-            outputs=[pdf_status, current_collection],
-        )
 
         def add_message(history, message):
             """Add user message to chat history."""
