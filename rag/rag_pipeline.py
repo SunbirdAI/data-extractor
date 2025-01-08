@@ -152,29 +152,36 @@ class RAGPipeline:
         self.index = VectorStoreIndex(
             nodes, vector_store=vector_store, embed_model=self.embedding_model
         )
+        
 
     def query(
         self, context: str, prompt_template: PromptTemplate = None
-    ) -> Tuple[str, Optional[Dict[str, Any]]]:
+    ) -> Tuple[str, List[Any]]:
         if prompt_template is None:
             prompt_template = PromptTemplate(
-                "Context information is below.\n"
-                "---------------------\n"
-                "{context_str}\n"
-                "---------------------\n"
-                "Given this information, please answer the question: {query_str}\n"
-                "Provide a detailed answer using the content from the context above. "
-                "If the question asks about specific page content, make sure to include that information. "
-                "Cite sources using square brackets for EVERY piece of information, e.g. [1], [2], etc. "
-                "If you're unsure about something, say so rather than making assumptions."
-            )
+            "Context information is below.\n"
+            "---------------------\n"
+            "{context_str}\n"
+            "---------------------\n"
+            "Given this information, please answer the question: {query_str}\n"
+            "Follow these guidelines for your response:\n"
+            "1. If the answer contains multiple pieces of information (e.g., author names, dates, statistics), "
+            "present it in a markdown table format.\n"
+            "2. For single piece information or simple answers, respond in a clear sentence.\n"
+            "3. Always cite sources using square brackets for EVERY piece of information, e.g. [1], [2], etc.\n"
+            "4. If the information spans multiple documents or pages, organize it by source.\n"
+            "5. If you're unsure about something, say so rather than making assumptions.\n"
+            "\nFormat tables like this:\n"
+            "| Field | Information | Source |\n"
+            "|-------|-------------|--------|\n"
+            "| Title | Example Title | [1] |\n"
+        )
 
         # Extract page number for PDF documents
         requested_page = (
             self.extract_page_number_from_query(context) if self.is_pdf else None
         )
 
-        # This is a hack to index all the documents in the store :)
         n_documents = len(self.index.docstore.docs)
         print(f"n_documents: {n_documents}")
         query_engine = self.index.as_query_engine(
@@ -185,25 +192,11 @@ class RAGPipeline:
         )
 
         response = query_engine.query(context)
-
-        # Handle source information based on document type
-        source_info = None
-        if hasattr(response, "source_nodes") and response.source_nodes:
-            source_node = response.source_nodes[0]
-            metadata = source_node.metadata
-
-            if self.is_pdf:
-                page_number = (
-                    requested_page
-                    if requested_page is not None
-                    else metadata.get("page_number", 0)
-                )
-                source_info = {
-                    "source_file": metadata.get("source_file"),
-                    "page_number": page_number,
-                    "title": metadata.get("title"),
-                    "authors": metadata.get("authors"),
-                    "content": source_node.text,
-                }
-
-        return response.response, source_info
+        
+        # Debug logging
+        print(f"Response type: {type(response)}")
+        print(f"Has source_nodes: {hasattr(response, 'source_nodes')}")
+        if hasattr(response, 'source_nodes'):
+            print(f"Number of source nodes: {len(response.source_nodes)}")
+        
+        return response.response, getattr(response, 'source_nodes', [])

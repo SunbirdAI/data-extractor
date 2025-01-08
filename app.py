@@ -494,7 +494,11 @@ def create_gr_interface() -> gr.Blocks:
 
                     # Right column: PDF Preview and Upload
                     with gr.Column(scale=3):
-                        pdf_preview = gr.Image(label="Source Page", height=600)
+                        # pdf_preview = gr.Image(label="Source Page", height=600)
+                        source_info = gr.Markdown(
+                            label="Sources", 
+                            value="No sources available yet."
+                        )
                         with gr.Row():
                             pdf_files = gr.File(
                                 file_count="multiple",
@@ -572,6 +576,31 @@ def create_gr_interface() -> gr.Blocks:
             history = history + [(message, None)]
             return history, "", None
 
+        def format_source_info(source_nodes) -> str:
+            """Format source information into a markdown string."""
+            if not source_nodes:
+                return "No source information available"
+            
+            sources_md = "### Sources\n\n"
+            seen_sources = set()  # To track unique sources
+            
+            for idx, node in enumerate(source_nodes, 1):
+                metadata = node.metadata
+                if not metadata:
+                    continue
+                    
+                source_key = (metadata.get('source_file', ''), metadata.get('page_number', 0))
+                if source_key in seen_sources:
+                    continue
+                    
+                seen_sources.add(source_key)
+                title = metadata.get('title', os.path.basename(metadata.get('source_file', 'Unknown')))
+                page = metadata.get('page_number', 'N/A')
+                
+                sources_md += f"{idx}. **{title}** - Page {page}\n"
+            
+            return sources_md
+
         def generate_chat_response(history, collection_id, pdf_processor):
             """Generate response for the last message in history."""
             if not collection_id:
@@ -583,41 +612,55 @@ def create_gr_interface() -> gr.Blocks:
             try:
                 # Get response and source info
                 rag = get_rag_pipeline(collection_id)
-                response, source_info = rag.query(last_message)
+                response_text, source_nodes = rag.query(last_message)
 
-                # Generate preview if source information is available
-                preview_image = None
-                if (
-                    source_info
-                    and source_info.get("source_file")
-                    and source_info.get("page_number") is not None
-                ):
-                    try:
-                        page_num = source_info["page_number"]
-                        logger.info(f"Attempting to render page {page_num}")
-                        preview_image = pdf_processor.render_page(
-                            source_info["source_file"], page_num
+                # Format sources info
+                sources_md = "### Top Sources\n\n"
+                if source_nodes and len(source_nodes) > 0:
+                    seen_sources = set()
+                    source_count = 0
+                    
+                    # Only process up to 3 sources
+                    for node in source_nodes:
+                        if source_count >= 3:  # Stop after 3 sources
+                            break
+                            
+                        if not hasattr(node, 'metadata'):
+                            continue
+                        
+                        metadata = node.metadata
+                        source_key = (
+                            metadata.get('source_file', ''), 
+                            metadata.get('page_number', 0)
                         )
-                        if preview_image:
-                            logger.info(
-                                f"Successfully generated preview for page {page_num}"
-                            )
-                        else:
-                            logger.warning(
-                                f"Failed to generate preview for page {page_num}"
-                            )
-                    except Exception as e:
-                        logger.error(f"Error generating PDF preview: {str(e)}")
-                        preview_image = None
+                        
+                        if source_key in seen_sources:
+                            continue
+                        
+                        seen_sources.add(source_key)
+                        source_count += 1
+                        
+                        title = metadata.get('title', 'Unknown')
+                        if not title or title == 'Unknown':
+                            title = os.path.basename(metadata.get('source_file', 'Unknown Document'))
+                            
+                        page = metadata.get('page_number', 'N/A')
+                        sources_md += f"{source_count}. **{title}** - Page {page}\n"
+                        
+                    if source_count == 0:
+                        sources_md = "No source information available"
+                else:
+                    sources_md = "No source information available"
 
                 # Update history with response
-                history[-1] = (last_message, response)
-                return history, preview_image
+                history[-1] = (last_message, response_text)
+                return history, sources_md
 
             except Exception as e:
                 logger.error(f"Error in generate_chat_response: {str(e)}")
                 history[-1] = (last_message, f"Error: {str(e)}")
-                return history, None
+                return history, "Error retrieving sources"
+    
 
         # Update PDF event handlers
         upload_btn.click(  # Change from pdf_files.upload to upload_btn.click
@@ -630,11 +673,11 @@ def create_gr_interface() -> gr.Blocks:
         chat_submit_btn.click(
             add_message,
             inputs=[chat_history, query_input],
-            outputs=[chat_history, query_input, pdf_preview],
+            outputs=[chat_history, query_input],
         ).success(
-            lambda h, c: generate_chat_response(h, c, pdf_processor),
+            generate_chat_response,
             inputs=[chat_history, current_collection],
-            outputs=[chat_history, pdf_preview],
+            outputs=[chat_history, source_info],
         )
 
     return demo

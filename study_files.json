@@ -1,5 +1,13 @@
 {
     "Ebola Virus": "data/ebola-virus_zotero_items.json",
     "GeneXpert": "data/genexpert_zotero_items.json",
-    "Vaccine coverage": "data/vaccine-coverage_zotero_items.json"
+    "Vaccine coverage": "data/vaccine-coverage_zotero_items.json",
+    "Concept": "data/concept_zotero_items.json",
+    "Zotero Collection Pastan": "data/zotero-collection-pastan_zotero_items.json",
+    "pdf_thequickone": "data/thequickone_20250108_111913_documents.json",
+    "pdf_aforapples": "data/aforapples_20250108_113044_documents.json",
+    "pdf_bforbinance": "data/bforbinance_20250108_114459_documents.json",
+    "pdf_cforcongo": "data/cforcongo_20250108_115233_documents.json",
+    "pdf_hjhj": "data/hjhj_20250108_115714_documents.json",
+    "pdf_schooldropouts": "data/schooldropouts_20250108_140257_documents.json"
 }
