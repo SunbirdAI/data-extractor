@@ -15,14 +15,9 @@ Pillow==10.2.0
 sqlmodel==0.0.22
 cachetools
 
-# LlamaIndex and related packages
-llama-index-core>=0.12.3
-llama-index-readers-docling>=0.1.0
-llama-index-node-parser-docling
-llama-index-vector-stores-chroma>=0.4.0
-llama-index-embeddings-huggingface
-llama-index-llms-huggingface-api
-llama-index-readers-file
-
-# Docling
-docling>=2.2.0
+# LlamaIndex ecosystem (pinned to compatible versions)
+llama-index-core==0.11.19
+docling==1.16.1
+llama-index-readers-docling==0.1.0
+llama-index-vector-stores-chroma==0.4.0
+llama-index-node-parser-docling==0.2.0
