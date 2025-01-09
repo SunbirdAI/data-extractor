@@ -355,7 +355,7 @@ def chat_response(
     history.append((message, response))
 
     # Generate PDF preview if source information is available
-    preview_image = None
+    # preview_image = None
     if (
         source_info
         and source_info.get("source_file")
@@ -364,13 +364,10 @@ def chat_response(
         try:
             # Get the first page number from the source
             page_num = source_info["page_numbers"][0]
-            preview_image = pdf_processor.render_page(
-                source_info["source_file"], int(page_num)
-            )
         except Exception as e:
             logger.error(f"Error generating PDF preview: {str(e)}")
 
-    return history, preview_image
+    return history
 
 
 def create_gr_interface() -> gr.Blocks:

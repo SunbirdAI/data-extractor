@@ -15,3 +15,5 @@ PyMuPDF==1.23.8
 Pillow==10.2.0
 sqlmodel==0.0.22
 cachetools
+docling
+llama-index-readers-docling
