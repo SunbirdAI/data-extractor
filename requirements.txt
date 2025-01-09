@@ -22,3 +22,4 @@ llama-index-readers-docling
 llama-index-vector-stores-chroma
 llama-index-node-parser-docling
 llama-index-embeddings-openai
+llama-index-llms-openai-like
