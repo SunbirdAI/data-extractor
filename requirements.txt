@@ -4,22 +4,32 @@ fastapi==0.115.5
 gradio==5.6.0
 gradio_client==1.4.3
 nest-asyncio==1.6.0
-openai==1.57.0
+openai
 pandas==2.2.3
 pydantic==2.9.2
 python-dotenv
 pyzotero
 python-slugify
+pypdf
 PyMuPDF==1.23.8  
-Pillow==10.2.0
+# Pillow
 sqlmodel==0.0.22
 cachetools
 
 # LlamaIndex ecosystem (pinned to compatible versions)
 llama-index-core
-docling
-llama-index-readers-docling
+docling==2.14.0
+llama-index-readers-docling==0.3.0
 llama-index-vector-stores-chroma
 llama-index-node-parser-docling
 llama-index-embeddings-openai
 llama-index-llms-openai-like
+
+# Langchain, will submit with llamaindex after successfull prototyping
+langchain
+langchain_openai
+langchain_experimental
+langchainhub
+tiktoken
+langchain_chroma
+reportlab==4.2.5

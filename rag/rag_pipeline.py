@@ -114,6 +114,7 @@ class RAGPipeline:
                         f"Title: {doc_data.get('title', '')}\n"
                         f"Abstract: {doc_data.get('abstract', '')}\n"
                         f"Authors: {', '.join(doc_data.get('authors', []))}\n"
+                        f"Fulltext: {doc_data.get('full_text', '')}\n"
                     )
 
                     metadata = {
@@ -152,30 +153,29 @@ class RAGPipeline:
         self.index = VectorStoreIndex(
             nodes, vector_store=vector_store, embed_model=self.embedding_model
         )
-        
 
     def query(
         self, context: str, prompt_template: PromptTemplate = None
     ) -> Tuple[str, List[Any]]:
         if prompt_template is None:
             prompt_template = PromptTemplate(
-            "Context information is below.\n"
-            "---------------------\n"
-            "{context_str}\n"
-            "---------------------\n"
-            "Given this information, please answer the question: {query_str}\n"
-            "Follow these guidelines for your response:\n"
-            "1. If the answer contains multiple pieces of information (e.g., author names, dates, statistics), "
-            "present it in a markdown table format.\n"
-            "2. For single piece information or simple answers, respond in a clear sentence.\n"
-            "3. Always cite sources using square brackets for EVERY piece of information, e.g. [1], [2], etc.\n"
-            "4. If the information spans multiple documents or pages, organize it by source.\n"
-            "5. If you're unsure about something, say so rather than making assumptions.\n"
-            "\nFormat tables like this:\n"
-            "| Field | Information | Source |\n"
-            "|-------|-------------|--------|\n"
-            "| Title | Example Title | [1] |\n"
-        )
+                "Context information is below.\n"
+                "---------------------\n"
+                "{context_str}\n"
+                "---------------------\n"
+                "Given this information, please answer the question: {query_str}\n"
+                "Follow these guidelines for your response:\n"
+                "1. If the answer contains multiple pieces of information (e.g., author names, dates, statistics), "
+                "present it in a markdown table format.\n"
+                "2. For single piece information or simple answers, respond in a clear sentence.\n"
+                "3. Always cite sources using square brackets for EVERY piece of information, e.g. [1], [2], etc.\n"
+                "4. If the information spans multiple documents or pages, organize it by source.\n"
+                "5. If you're unsure about something, say so rather than making assumptions.\n"
+                "\nFormat tables like this:\n"
+                "| Field | Information | Source |\n"
+                "|-------|-------------|--------|\n"
+                "| Title | Example Title | [1] |\n"
+            )
 
         # Extract page number for PDF documents
         requested_page = (
@@ -192,11 +192,11 @@ class RAGPipeline:
         )
 
         response = query_engine.query(context)
-        
+
         # Debug logging
         print(f"Response type: {type(response)}")
         print(f"Has source_nodes: {hasattr(response, 'source_nodes')}")
-        if hasattr(response, 'source_nodes'):
+        if hasattr(response, "source_nodes"):
             print(f"Number of source nodes: {len(response.source_nodes)}")
-        
-        return response.response, getattr(response, 'source_nodes', [])
+
+        return response.response, getattr(response, "source_nodes", [])

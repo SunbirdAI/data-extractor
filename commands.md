@@ -38,7 +38,8 @@ docker push "${ECR_BACKEND_GRADIO_URL}:latest"
 
 
 docker build -f Dockerfile.api -t fastapi-app .
-docker run -it -p 8000:8000 --rm --name fastapi --network=gradio-fastapi-network fastapi-app
+docker run -it -p 8000:8000 --rm --name fastapi --network=gradio-fastapi-network \
+  -e GRADIO_URL='https://5ef388cd3a964f0560.gradio.live/' fastapi-app
 
 aws ecr create-repository \
   --repository-name fastapi-api-prod \
@@ -50,4 +51,8 @@ echo $ECR_BACKEND_FASTAPI_URL
 docker build --build-arg AWS_ACCOUNT_ID=$AWS_ACCOUNT_ID -f Dockerfile.api.prod -t fastapi-api-prod .
 docker tag fastapi-api-prod:latest "${ECR_BACKEND_FASTAPI_URL}:latest"
 docker push "${ECR_BACKEND_FASTAPI_URL}:latest"
+
+
+docker run -it -p 8000:8000 --rm --name fastapi --network=gradio-fastapi-network \
+  -e GRADIO_URL='https://5ef388cd3a964f0560.gradio.live/' fastapi-api-prod
 

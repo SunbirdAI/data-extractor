@@ -7,10 +7,12 @@ import io
 import json
 import logging
 import os
+import shutil
 from typing import Any, List, Tuple, Union
 
 import gradio as gr
 import openai
+import pandas as pd
 from cachetools import LRUCache
 from dotenv import load_dotenv
 from slugify import slugify
@@ -34,6 +36,17 @@ from utils.helpers import (
 from utils.pdf_processor import PDFProcessor
 from utils.prompts import evidence_based_prompt, highlight_prompt
 from utils.zotero_manager import ZoteroManager
+from utils.zotero_pdf_processory import (
+    dataframe_to_markdown,
+    down_zotero_collection_item_attachment_pdfs,
+    export_dataframe_to_csv,
+    get_zotero_collection_item_by_name,
+    get_zotero_collection_items,
+    map_reduce_summarise_document_data_json,
+    process_multiple_pdfs,
+    stuff_summarise_document_data_json,
+    update_summary_columns,
+)
 
 data_directory = "data"
 create_directory(data_directory)
@@ -129,6 +142,37 @@ def markdown_table_to_csv(markdown_text: str) -> str:
     return output.getvalue()
 
 
+def delete_files_in_directory(directory_path):
+    """
+    Deletes all files in the specified directory if it exists.
+
+    Args:
+        directory_path (str): Path to the directory whose files are to be deleted.
+
+    Returns:
+        str: Message indicating the result of the operation.
+    """
+    if not os.path.exists(directory_path):
+        return f"Directory '{directory_path}' does not exist."
+
+    if not os.path.isdir(directory_path):
+        return f"'{directory_path}' is not a directory."
+
+    try:
+        # List all files and directories in the specified directory
+        for item in os.listdir(directory_path):
+            item_path = os.path.join(directory_path, item)
+            # Check if it's a file and delete it
+            if os.path.isfile(item_path):
+                os.remove(item_path)
+            # Check if it's a directory and delete it recursively
+            elif os.path.isdir(item_path):
+                shutil.rmtree(item_path)
+        return f"All files and directories in '{directory_path}' have been deleted."
+    except Exception as e:
+        return f"An error occurred while deleting files: {e}"
+
+
 def cleanup_temp_files():
     """Clean up old temporary files."""
     try:
@@ -143,25 +187,53 @@ def cleanup_temp_files():
                         os.remove(file)
                     except Exception as e:
                         logger.warning(f"Failed to remove temp file {file}: {e}")
+        logger.info("Cleaning up temporary files")
+        delete_files_in_directory("zotero_data")
     except Exception as e:
         logger.warning(f"Error during cleanup: {e}")
 
 
-def chat_function(message: str, study_name: str, prompt_type: str) -> str:
+def chat_function(
+    message: str, study_name: str, prompt_type: str, variable_list: list
+) -> str:
     """Process a chat message and generate a response using the RAG pipeline."""
+    df = pd.DataFrame()
+    zotero_library_type = "user"
+    zotero_library_id = get_cache_value("zotero_library_id")
+    zotero_api_access_key = get_cache_value("zotero_api_access_key")
+    zotero_manager = ZoteroManager(
+        zotero_library_id, zotero_library_type, zotero_api_access_key
+    )
 
     if not message.strip():
         return "Please enter a valid query."
 
-    rag = get_rag_pipeline(study_name)
-    logger.info(f"rag: {rag}")
-    prompt = {
-        "Highlight": highlight_prompt,
-        "Evidence-based": evidence_based_prompt,
-    }.get(prompt_type)
+    zotero_collection = get_zotero_collection_item_by_name(zotero_manager, study_name)
+    collection_items = get_zotero_collection_items(
+        zotero_manager, zotero_collection.key
+    )
+    attachments = down_zotero_collection_item_attachment_pdfs(
+        zotero_manager, collection_items
+    )
+    variables = ", ".join(variable_list)
+    if attachments:
+        df = process_multiple_pdfs(
+            attachments, variables, stuff_summarise_document_data_json
+        )
+        # df = process_multiple_pdfs(
+        #     attachments, variables, map_reduce_summarise_document_data_json
+        # )
 
-    response, _ = rag.query(message, prompt_template=prompt)  # Unpack the tuple
-    return response
+        df = update_summary_columns(df)
+        msg = export_dataframe_to_csv(df, f"zotero_data/{study_name}.csv")
+        logger.info(msg)
+        # markdown_table = dataframe_to_markdown(df)
+    else:
+        df = pd.DataFrame(
+            {"Attachments": ["Documents have no pdf attachements to process"]}
+        )
+
+    return df
 
 
 def process_zotero_library_items(
@@ -175,6 +247,7 @@ def process_zotero_library_items(
     cache["zotero_library_id"] = zotero_library_id
     zotero_library_type = "user"  # or "group"
     zotero_api_access_key = zotero_api_access_key
+    cache["zotero_api_access_key"] = zotero_api_access_key
 
     message = ""
 
@@ -211,6 +284,7 @@ def process_zotero_library_items(
                 zotero_manager.write_zotero_items_to_json_file(
                     zotero_items_json, f"data/{export_file}"
                 )
+                logger.info(f"Adding {collection_name} - {export_file} to study files")
                 append_to_study_files(
                     "study_files.json", collection_name, f"data/{export_file}"
                 )
@@ -274,25 +348,18 @@ def process_multi_input(text, study_name, prompt_type):
     variable_list = [word.strip().upper() for word in text.split(",")]
     user_message = f"Extract and present in a tabular format the following variables for each {study_name} study: {', '.join(variable_list)}"
     logger.info(f"User message: {user_message}")
-    response = chat_function(user_message, study_name, prompt_type)
+    response = chat_function(user_message, study_name, prompt_type, variable_list)
     return [response, gr.update(visible=True)]
 
 
-def download_as_csv(markdown_content):
-    """Convert markdown table to CSV and provide for download."""
-    if not markdown_content:
-        return None
-
-    csv_content = markdown_table_to_csv(markdown_content)
-    if not csv_content:
-        return None
+def download_as_csv(df):
+    """Convert dataframe to CSV and provide for download."""
 
     # Create temporary file with actual content
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    temp_path = f"study_export_{timestamp}.csv"
+    temp_path = f"zotero_data/study_export_{timestamp}.csv"
 
-    with open(temp_path, "w", newline="", encoding="utf-8") as f:
-        f.write(csv_content)
+    export_dataframe_to_csv(df, temp_path)
 
     return temp_path
 
@@ -460,7 +527,7 @@ def create_gr_interface() -> gr.Blocks:
                                 autofocus=True,
                             )
                             submit_btn = gr.Button("Submit", scale=1)
-                        answer_output = gr.Markdown(label="Answer")
+                        answer_output = gr.DataFrame(label="Answer")
                         download_btn = gr.DownloadButton(
                             "Download as CSV",
                             variant="primary",
@@ -493,8 +560,7 @@ def create_gr_interface() -> gr.Blocks:
                     with gr.Column(scale=3):
                         # pdf_preview = gr.Image(label="Source Page", height=600)
                         source_info = gr.Markdown(
-                            label="Sources", 
-                            value="No sources available yet."
+                            label="Sources", value="No sources available yet."
                         )
                         with gr.Row():
                             pdf_files = gr.File(
@@ -551,17 +617,24 @@ def create_gr_interface() -> gr.Blocks:
                 # Process PDFs
                 output_path = processor.process_pdfs(files, name)
                 collection_id = f"pdf_{slugify(name)}"
-                
+
                 # Add to study files JSON
                 append_to_study_files("study_files.json", collection_id, output_path)
-                
+
                 # Add to ChromaDB
-                add_study_files_to_chromadb("study_files.json", "study_files_collection")
-                
+                add_study_files_to_chromadb(
+                    "study_files.json", "study_files_collection"
+                )
+
                 # Add to SQLite database - this is the crucial missing step
-                add_study_files_to_db("study_files.json", "local")  # Add library_id parameter
-                
-                return f"Successfully processed PDFs into collection: {collection_id}", collection_id
+                add_study_files_to_db(
+                    "study_files.json", "local"
+                )  # Add library_id parameter
+
+                return (
+                    f"Successfully processed PDFs into collection: {collection_id}",
+                    collection_id,
+                )
             except Exception as e:
                 logger.error(f"Error in handle_pdf_upload: {str(e)}")
                 return f"Error: {str(e)}", None
@@ -577,25 +650,30 @@ def create_gr_interface() -> gr.Blocks:
             """Format source information into a markdown string."""
             if not source_nodes:
                 return "No source information available"
-            
+
             sources_md = "### Sources\n\n"
             seen_sources = set()  # To track unique sources
-            
+
             for idx, node in enumerate(source_nodes, 1):
                 metadata = node.metadata
                 if not metadata:
                     continue
-                    
-                source_key = (metadata.get('source_file', ''), metadata.get('page_number', 0))
+
+                source_key = (
+                    metadata.get("source_file", ""),
+                    metadata.get("page_number", 0),
+                )
                 if source_key in seen_sources:
                     continue
-                    
+
                 seen_sources.add(source_key)
-                title = metadata.get('title', os.path.basename(metadata.get('source_file', 'Unknown')))
-                page = metadata.get('page_number', 'N/A')
-                
+                title = metadata.get(
+                    "title", os.path.basename(metadata.get("source_file", "Unknown"))
+                )
+                page = metadata.get("page_number", "N/A")
+
                 sources_md += f"{idx}. **{title}** - Page {page}\n"
-            
+
             return sources_md
 
         def generate_chat_response(history, collection_id, pdf_processor):
@@ -616,34 +694,36 @@ def create_gr_interface() -> gr.Blocks:
                 if source_nodes and len(source_nodes) > 0:
                     seen_sources = set()
                     source_count = 0
-                    
+
                     # Only process up to 3 sources
                     for node in source_nodes:
                         if source_count >= 3:  # Stop after 3 sources
                             break
-                            
-                        if not hasattr(node, 'metadata'):
+
+                        if not hasattr(node, "metadata"):
                             continue
-                        
+
                         metadata = node.metadata
                         source_key = (
-                            metadata.get('source_file', ''), 
-                            metadata.get('page_number', 0)
+                            metadata.get("source_file", ""),
+                            metadata.get("page_number", 0),
                         )
-                        
+
                         if source_key in seen_sources:
                             continue
-                        
+
                         seen_sources.add(source_key)
                         source_count += 1
-                        
-                        title = metadata.get('title', 'Unknown')
-                        if not title or title == 'Unknown':
-                            title = os.path.basename(metadata.get('source_file', 'Unknown Document'))
-                            
-                        page = metadata.get('page_number', 'N/A')
+
+                        title = metadata.get("title", "Unknown")
+                        if not title or title == "Unknown":
+                            title = os.path.basename(
+                                metadata.get("source_file", "Unknown Document")
+                            )
+
+                        page = metadata.get("page_number", "N/A")
                         sources_md += f"{source_count}. **{title}** - Page {page}\n"
-                        
+
                     if source_count == 0:
                         sources_md = "No source information available"
                 else:
@@ -657,7 +737,6 @@ def create_gr_interface() -> gr.Blocks:
                 logger.error(f"Error in generate_chat_response: {str(e)}")
                 history[-1] = (last_message, f"Error: {str(e)}")
                 return history, "Error retrieving sources"
-    
 
         # Update PDF event handlers
         upload_btn.click(  # Change from pdf_files.upload to upload_btn.click

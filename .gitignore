@@ -179,6 +179,7 @@ pyrightconfig.json
 
 # data
 data/
+zotero_data/
 study_export_*
 study_files.db
 study_files.json

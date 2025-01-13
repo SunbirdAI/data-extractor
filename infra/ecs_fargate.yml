@@ -24,16 +24,16 @@ Parameters:
     Default: rag-ecs-cluster
   GradioTaskDefinitionCPU:
     Type: Number
-    Default: 512
+    Default: 2048
   GradioTaskDefinitionMemory:
     Type: Number 
-    Default: 1024
+    Default: 4096
   FastAPITaskDefinitionCPU:
     Type: Number
-    Default: 256
+    Default: 2048
   FastAPITaskDefinitionMemory: 
     Type: Number
-    Default: 512
+    Default: 4096
   
   # Container Images
   ContainerImageGradio:
@@ -298,7 +298,7 @@ Resources:
       Scheme: internet-facing
       LoadBalancerAttributes:
         - Key: idle_timeout.timeout_seconds
-          Value: '60'
+          Value: '600'
       Subnets:
         - !Ref PublicSubnet1
         - !Ref PublicSubnet2
@@ -361,7 +361,7 @@ Resources:
       Scheme: internet-facing
       LoadBalancerAttributes:
         - Key: idle_timeout.timeout_seconds
-          Value: '60'
+          Value: '600'
       Subnets:
         - !Ref PublicSubnet1
         - !Ref PublicSubnet2

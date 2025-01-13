@@ -11,10 +11,9 @@ import logging
 import os
 import re
 from typing import Dict, List, Optional
-from llama_index.readers.docling import DoclingReader
-
 
 import fitz
+from llama_index.readers.docling import DoclingReader
 from PIL import Image
 from slugify import slugify
 
@@ -125,61 +124,64 @@ class PDFProcessor:
             reader = DoclingReader()
             documents = reader.load_data(file_path)
             text = documents[0].text if documents else ""
-            
+
             # Use PyMuPDF to get accurate page count
             doc = fitz.open(file_path)
             total_pages = len(doc)
-            
+
             # Extract title from document
             title = os.path.basename(file_path)
-            title_match = re.search(r'#+ (.+?)\n', text)
+            title_match = re.search(r"#+ (.+?)\n", text)
             if title_match:
                 title = title_match.group(1).strip()
-            
+
             # Extract abstract
             abstract = ""
-            abstract_match = re.search(r'Abstract:?(.*?)(?=\n\n|Keywords:|$)', text, re.DOTALL | re.IGNORECASE)
+            abstract_match = re.search(
+                r"Abstract:?(.*?)(?=\n\n|Keywords:|$)", text, re.DOTALL | re.IGNORECASE
+            )
             if abstract_match:
                 abstract = abstract_match.group(1).strip()
-            
+
             # Extract authors
             authors = []
-            author_section = re.search(r'\n(.*?)\n.*?Department', text)
+            author_section = re.search(r"\n(.*?)\n.*?Department", text)
             if author_section:
                 author_text = author_section.group(1)
-                authors = [a.strip() for a in author_text.split(',') if a.strip()]
-            
+                authors = [a.strip() for a in author_text.split(",") if a.strip()]
+
             # Remove references section
             content = text
-            ref_patterns = [r'\nReferences\n', r'\nBibliography\n', r'\nWorks Cited\n']
+            ref_patterns = [r"\nReferences\n", r"\nBibliography\n", r"\nWorks Cited\n"]
             for pattern in ref_patterns:
                 split_text = re.split(pattern, content, flags=re.IGNORECASE)
                 if len(split_text) > 1:
                     content = split_text[0]
                     break
-            
+
             # Map content to pages using PyMuPDF for accurate page numbers
             pages = {}
             for page_num in range(total_pages):
                 page = doc[page_num]
                 page_text = page.get_text()
-                
+
                 # Skip if this appears to be a references page
                 if self.is_references_page(page_text):
                     logger.info(f"Skipping references page {page_num}")
                     continue
-                    
+
                 # Look for this page's content in the Docling-extracted text
                 # This is a heuristic approach - we look for unique phrases from the page
                 key_phrases = self._get_key_phrases(page_text)
                 page_content = self._find_matching_content(content, key_phrases)
-                
+
                 if page_content:
                     pages[str(page_num)] = {
-                        'text': page_content,
-                        'page_number': page_num + 1  # 1-based page numbers for human readability
+                        "text": page_content,
+                        "page_number": page_num
+                        + 1,  # 1-based page numbers for human readability
                     }
-            
+
             # Create structured document with page-aware content
             document = {
                 "title": title,
@@ -190,12 +192,12 @@ class PDFProcessor:
                 "source_file": file_path,
                 "pages": pages,
                 "page_count": total_pages,
-                "content_pages": len(pages)  # Number of non-reference pages
+                "content_pages": len(pages),  # Number of non-reference pages
             }
-            
+
             doc.close()
             return document
-            
+
         except Exception as e:
             logger.error(f"Error processing PDF {file_path}: {str(e)}")
             raise
@@ -205,17 +207,19 @@ class PDFProcessor:
         words = text.split()
         phrases = []
         for i in range(0, len(words), phrase_length):
-            phrase = ' '.join(words[i:i + phrase_length])
+            phrase = " ".join(words[i : i + phrase_length])
             if len(phrase.strip()) > 20:  # Only use substantial phrases
                 phrases.append(phrase)
         return phrases
 
-    def _find_matching_content(self, docling_text: str, key_phrases: List[str]) -> Optional[str]:
+    def _find_matching_content(
+        self, docling_text: str, key_phrases: List[str]
+    ) -> Optional[str]:
         """Find the corresponding content in Docling text using key phrases."""
         for phrase in key_phrases:
             if phrase in docling_text:
                 # Find the paragraph or section containing this phrase
-                paragraphs = docling_text.split('\n\n')
+                paragraphs = docling_text.split("\n\n")
                 for para in paragraphs:
                     if phrase in para:
                         return para

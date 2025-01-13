@@ -1,8 +1,10 @@
+import json
 import logging
 import os
 from enum import Enum
-from typing import List, Optional, Union
+from typing import Any, List, Optional, Union
 
+import pandas as pd
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -58,7 +60,9 @@ class StudyVariableRequest(BaseModel):
 
 
 class DownloadCSV(BaseModel):
-    text: constr(min_length=1, strip_whitespace=True)  # type: ignore
+    headers: List[str]
+    data: List[List[Any]]
+    metadata: Optional[Any] = None  # Metadata is nullable
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -74,6 +78,32 @@ class ZoteroCredentials(BaseModel):
     api_access_key: constr(min_length=1, strip_whitespace=True)  # type: ignore
 
     model_config = ConfigDict(from_attributes=True)
+
+
+def json_to_dataframe(json_data):
+    """
+    Converts a JSON object into a pandas DataFrame.
+
+    Args:
+        json_data (dict or str): The JSON object or JSON string to convert. Must include 'headers' and 'data' keys.
+
+    Returns:
+        pd.DataFrame: A pandas DataFrame created from the JSON data.
+    """
+    # If the input is a JSON string, parse it into a dictionary
+    # Extract headers and data
+    if isinstance(json_data, str):
+        json_data = json.loads(json_data)
+        headers = json_data.get("headers", [])
+        data = json_data.get("data", [])
+    else:
+        headers = json_data.headers
+        data = json_data.data
+
+    # Convert to DataFrame
+    dataframe = pd.DataFrame(data, columns=headers)
+
+    return dataframe
 
 
 @app.post("/process_zotero_library_items", tags=["zotero"])
@@ -114,11 +144,10 @@ def new_study_choices():
 
 
 @app.post("/download_csv", tags=["zotero"])
-def download_csv(download_request: DownloadCSV):
-    result = client.predict(
-        markdown_content=download_request.text, api_name="/download_as_csv"
-    )
-    print(result)
+def download_csv(payload: DownloadCSV):
+    json_data = payload.model_dump()
+    result = client.predict(df=json_data, api_name="/download_as_csv")
+    logger.info(result)
 
     file_path = result
     if not file_path or not os.path.exists(file_path):
