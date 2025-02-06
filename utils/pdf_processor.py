@@ -1,3 +1,5 @@
+# utils/pdf_processor.py
+
 """
 PDF processing module for ACRES RAG Platform.
 Handles PDF file processing, text extraction, and page rendering.
@@ -6,16 +8,19 @@ Handles PDF file processing, text extraction, and page rendering.
 import datetime
 import json
 import logging
-# utils/pdf_processor.py
 import os
 import re
 from typing import Dict, List, Optional
 
 import fitz
+from llama_index.readers.docling import DoclingReader
 from PIL import Image
 from slugify import slugify
 
 logger = logging.getLogger(__name__)
+
+
+reader = DoclingReader()
 
 
 class PDFProcessor:
@@ -24,30 +29,6 @@ class PDFProcessor:
         self.upload_dir = upload_dir
         os.makedirs(upload_dir, exist_ok=True)
         self.current_page = 0
-
-    def render_page(self, file_path: str, page_num: int) -> Optional[Image.Image]:
-        """Render a specific page from a PDF as an image."""
-        try:
-            logger.info(f"Attempting to render page {page_num} from {file_path}")
-            doc = fitz.open(file_path)
-
-            # Ensure page number is valid
-            if page_num < 0 or page_num >= len(doc):
-                logger.error(
-                    f"Invalid page number {page_num} for document with {len(doc)} pages"
-                )
-                return None
-
-            page = doc[page_num]
-            # Increase resolution for better quality
-            pix = page.get_pixmap(matrix=fitz.Matrix(300 / 72, 300 / 72))
-            image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-            doc.close()
-            logger.info(f"Successfully rendered page {page_num}")
-            return image
-        except Exception as e:
-            logger.error(f"Error rendering page {page_num} from {file_path}: {str(e)}")
-            return None
 
     def is_references_page(self, text: str) -> bool:
         """
@@ -134,60 +115,112 @@ class PDFProcessor:
         return output_path
 
     def extract_text_from_pdf(self, file_path: str) -> Dict:
-        """Extract text and metadata from a PDF file."""
+        """
+        Extract text and metadata from a PDF file using DoclingReader.
+        Maintains accurate page numbers for source citation.
+        """
         try:
+            # Use DoclingReader for main content extraction
+            reader = DoclingReader()
+            documents = reader.load_data(file_path)
+            text = documents[0].text if documents else ""
+
+            # Use PyMuPDF to get accurate page count
             doc = fitz.open(file_path)
+            total_pages = len(doc)
 
-            # Find references section start
-            refs_start = self.detect_references_start(doc)
+            # Extract title from document
+            title = os.path.basename(file_path)
+            title_match = re.search(r"#+ (.+?)\n", text)
+            if title_match:
+                title = title_match.group(1).strip()
 
-            # Extract text from all pages with page tracking
-            text = ""
+            # Extract abstract
+            abstract = ""
+            abstract_match = re.search(
+                r"Abstract:?(.*?)(?=\n\n|Keywords:|$)", text, re.DOTALL | re.IGNORECASE
+            )
+            if abstract_match:
+                abstract = abstract_match.group(1).strip()
+
+            # Extract authors
+            authors = []
+            author_section = re.search(r"\n(.*?)\n.*?Department", text)
+            if author_section:
+                author_text = author_section.group(1)
+                authors = [a.strip() for a in author_text.split(",") if a.strip()]
+
+            # Remove references section
+            content = text
+            ref_patterns = [r"\nReferences\n", r"\nBibliography\n", r"\nWorks Cited\n"]
+            for pattern in ref_patterns:
+                split_text = re.split(pattern, content, flags=re.IGNORECASE)
+                if len(split_text) > 1:
+                    content = split_text[0]
+                    break
+
+            # Map content to pages using PyMuPDF for accurate page numbers
             pages = {}
-            for page_num in range(len(doc)):
-                # Skip if this is after references section starts
-                if refs_start is not None and page_num >= refs_start:
-                    logger.info(
-                        f"Skipping page {page_num} as it appears to be part of references"
-                    )
+            for page_num in range(total_pages):
+                page = doc[page_num]
+                page_text = page.get_text()
+
+                # Skip if this appears to be a references page
+                if self.is_references_page(page_text):
+                    logger.info(f"Skipping references page {page_num}")
                     continue
 
-                page_text = doc[page_num].get_text()
+                # Look for this page's content in the Docling-extracted text
+                # This is a heuristic approach - we look for unique phrases from the page
+                key_phrases = self._get_key_phrases(page_text)
+                page_content = self._find_matching_content(content, key_phrases)
 
-                # Extra check to catch references if they weren't caught by the initial scan
-                if page_num > 0 and self.is_references_page(page_text):
-                    logger.info(
-                        f"Detected references content on page {page_num}, skipping"
-                    )
-                    continue
+                if page_content:
+                    pages[str(page_num)] = {
+                        "text": page_content,
+                        "page_number": page_num
+                        + 1,  # 1-based page numbers for human readability
+                    }
 
-                pages[str(page_num)] = page_text
-                text += page_text + "\n"
-
-            # Extract metadata
-            metadata = doc.metadata
-            if not metadata.get("title"):
-                metadata["title"] = os.path.basename(file_path)
-
-            # Create structured document
+            # Create structured document with page-aware content
             document = {
-                "title": metadata.get("title", ""),
-                "authors": (
-                    metadata.get("author", "").split(";")
-                    if metadata.get("author")
-                    else []
-                ),
-                "date": metadata.get("creationDate", ""),
-                "abstract": text[:500] + "..." if len(text) > 500 else text,
-                "full_text": text,
+                "title": title,
+                "authors": authors,
+                "date": "",  # Could be extracted if needed
+                "abstract": abstract,
+                "full_text": content,
                 "source_file": file_path,
                 "pages": pages,
-                "page_count": len(doc),
-                "content_pages": len(pages),  # Number of pages excluding references
+                "page_count": total_pages,
+                "content_pages": len(pages),  # Number of non-reference pages
             }
 
             doc.close()
             return document
+
         except Exception as e:
             logger.error(f"Error processing PDF {file_path}: {str(e)}")
             raise
+
+    def _get_key_phrases(self, text: str, phrase_length: int = 10) -> List[str]:
+        """Extract key phrases from text for matching."""
+        words = text.split()
+        phrases = []
+        for i in range(0, len(words), phrase_length):
+            phrase = " ".join(words[i : i + phrase_length])
+            if len(phrase.strip()) > 20:  # Only use substantial phrases
+                phrases.append(phrase)
+        return phrases
+
+    def _find_matching_content(
+        self, docling_text: str, key_phrases: List[str]
+    ) -> Optional[str]:
+        """Find the corresponding content in Docling text using key phrases."""
+        for phrase in key_phrases:
+            if phrase in docling_text:
+                # Find the paragraph or section containing this phrase
+                paragraphs = docling_text.split("\n\n")
+                for para in paragraphs:
+                    if phrase in para:
+                        return para
+        return None

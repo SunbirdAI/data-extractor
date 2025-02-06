@@ -1,8 +1,10 @@
 {
-    "Vaccine coverage": "data/vaccine_coverage_zotero_items.json",
-    "Ebola Virus": "data/ebola_virus_zotero_items.json",
-    "GeneXpert": "data/gene_xpert_zotero_items.json",
+    "Ebola Virus": "data/ebola-virus_zotero_items.json",
+    "GeneXpert": "data/genexpert_zotero_items.json",
+    "Vaccine coverage": "data/vaccine-coverage_zotero_items.json",
+    "Concept": "data/concept_zotero_items.json",
     "Zotero Collection Pastan": "data/zotero-collection-pastan_zotero_items.json",
+    "Natural resources degradation": "data/natural-resources-degradation_zotero_items.json",
     "EBSCOhost": "data/ebscohost_zotero_items.json",
     "ref BMGF": "data/ref-bmgf_zotero_items.json",
     "scholar (29)": "data/scholar-29_zotero_items.json",

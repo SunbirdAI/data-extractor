@@ -5,7 +5,7 @@
 ARG AWS_ACCOUNT_ID
 
 # pull official base image
-FROM ${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/gradio-python:3.11.10-slim as builder
+FROM ${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/gradio-python:3.11.10-slim AS builder
 
 # set work directory
 WORKDIR /app
