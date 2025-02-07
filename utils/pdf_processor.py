@@ -1,10 +1,5 @@
 # utils/pdf_processor.py
 
-"""
-PDF processing module for ACRES RAG Platform.
-Handles PDF file processing, text extraction, and page rendering.
-"""
-
 import datetime
 import json
 import logging
@@ -13,30 +8,47 @@ import re
 from typing import Dict, List, Optional
 
 import fitz
-from llama_index.readers.docling import DoclingReader
-from llama_index.readers.file import PyMuPDFReader
-
-from PIL import Image
+from langchain import PromptTemplate
+from langchain.chains.summarize import load_summarize_chain
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.document_loaders import Docx2txtLoader, PyPDFLoader, TextLoader
+from langchain_openai import ChatOpenAI
 from slugify import slugify
 
 logger = logging.getLogger(__name__)
 
 
-reader = DoclingReader()
+def load_document(file: str) -> Optional[List]:
+    """Load document using appropriate loader based on file extension."""
+    loaders = {".pdf": PyPDFLoader, ".docx": Docx2txtLoader, ".txt": TextLoader}
+
+    extension = os.path.splitext(file)[1].lower()
+    if extension not in loaders:
+        raise ValueError(f"Unsupported document format: {extension}")
+
+    print(f"Loading {file}")
+    loader = loaders[extension](file)
+    return loader.load()
+
+
+def chunk_data(data, chunk_size=256, chunk_overlap=20):
+    """Split document into chunks for processing."""
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size, chunk_overlap=chunk_overlap
+    )
+    chunks = text_splitter.split_documents(data)
+    return chunks
 
 
 class PDFProcessor:
     def __init__(self, upload_dir: str = "data/uploads"):
-        """Initialize PDFProcessor with upload directory."""
         self.upload_dir = upload_dir
+        self.var_list = []
+        self.formatted_vars = ""
         os.makedirs(upload_dir, exist_ok=True)
-        self.current_page = 0
 
     def is_references_page(self, text: str) -> bool:
-        """
-        Check if the page appears to be a references/bibliography page.
-        """
-        # Common section headers for references
+        """Check if the page appears to be a references/bibliography page."""
         ref_headers = [
             r"^references\s*$",
             r"^bibliography\s*$",
@@ -45,16 +57,13 @@ class PDFProcessor:
             r"^cited literature\s*$",
         ]
 
-        # Check first few lines of the page
         first_lines = text.lower().split("\n")[:3]
         first_block = " ".join(first_lines)
 
-        # Check for reference headers
         for header in ref_headers:
             if re.search(header, first_block, re.IGNORECASE):
                 return True
 
-        # Check for reference-like patterns (e.g., [1] Author, et al.)
         ref_patterns = [
             r"^\[\d+\]",  # [1] style
             r"^\d+\.",  # 1. style
@@ -62,39 +71,59 @@ class PDFProcessor:
         ]
 
         ref_pattern_count = 0
-        lines = text.split("\n")[:10]  # Check first 10 lines
+        lines = text.split("\n")[:10]
         for line in lines:
             line = line.strip()
             if any(re.match(pattern, line) for pattern in ref_patterns):
                 ref_pattern_count += 1
 
-        # If multiple reference-like patterns are found, likely a references page
         return ref_pattern_count >= 3
 
-    def detect_references_start(self, doc: fitz.Document) -> Optional[int]:
-        """
-        Detect the page where references section starts.
-        Returns the page number or None if not found.
-        """
-        for page_num in range(len(doc)):
-            page = doc[page_num]
-            text = page.get_text()
-            if self.is_references_page(text):
-                logger.info(f"Detected references section starting at page {page_num}")
-                return page_num
-        return None
+    def prepare_variables(self, variables: str):
+        """Prepare variables for processing."""
+        if variables:
+            # Clean and format variable names
+            self.var_list = [v.strip().upper() for v in variables.split(",")]
+            self.formatted_vars = "\n".join(f"- {var}" for var in self.var_list)
+        else:
+            self.var_list = []
+            self.formatted_vars = ""
 
-    def process_pdfs(self, file_paths: List[str], collection_name: str) -> str:
+    def process_pdfs(
+        self, file_paths: List[str], collection_name: str, variables: str = ""
+    ) -> str:
         """Process multiple PDF files and store their content."""
+        # Prepare variables
+        self.prepare_variables(variables)
+
         processed_docs = []
+        chunk_size = 10000
+        chunk_overlap = 100
 
         for file_path in file_paths:
             try:
-                doc_data = self.extract_text_from_pdf(file_path)
-                processed_docs.append(doc_data)
-                logger.info(
-                    f"Successfully processed {file_path} ({doc_data['content_pages']} content pages)"
+                # Load and chunk the document
+                pdf_data = load_document(file_path)
+                pdf_chunks = chunk_data(
+                    pdf_data, chunk_size=chunk_size, chunk_overlap=chunk_overlap
                 )
+
+                # Generate summary using the stuff chain
+                output_summary = self.summarize_document(pdf_chunks, variables)
+
+                # Extract JSON data
+                try:
+                    json_data = self.extract_json_from_text(
+                        output_summary["output_text"]
+                    )
+                except ValueError:
+                    # If JSON extraction fails, create a basic structure
+                    json_data = self.create_basic_document_structure(
+                        file_path, pdf_data
+                    )
+
+                processed_docs.append(json_data)
+                logger.info(f"Successfully processed {file_path}")
             except Exception as e:
                 logger.error(f"Error processing {file_path}: {str(e)}")
                 continue
@@ -107,122 +136,126 @@ class PDFProcessor:
         output_filename = f"{slugify(collection_name)}_{timestamp}_documents.json"
         output_path = os.path.join("data", output_filename)
 
-        # Ensure the data directory exists
         os.makedirs("data", exist_ok=True)
-
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(processed_docs, f, indent=2, ensure_ascii=False)
 
         logger.info(f"Saved processed documents to {output_path}")
         return output_path
 
-    def extract_text_from_pdf(self, file_path: str) -> Dict:
-        """
-        Extract text and metadata from a PDF file using DoclingReader.
-        Maintains accurate page numbers for source citation.
-        """
+    def summarize_document(self, chunks, variables):
+        """Summarize document using the stuff chain."""
+        if variables:
+            # Create a structured extraction prompt based on provided variables
+            template = """Extract specific information from the following text for each requested variable.
+
+Text: {text}
+
+For each of these variables, extract the relevant information:
+{variables}
+
+Format your response as a JSON object with these exact variable names as keys.
+If a variable's information cannot be found, use null as its value.
+
+Example format:
+```json
+{{
+    "VARIABLE_1": "extracted value 1",
+    "VARIABLE_2": "extracted value 2",
+    "VARIABLE_3": null
+}}
+```
+
+IMPORTANT: 
+- Ensure all requested variables are included in the JSON output
+- Use exact variable names as provided
+- Return ONLY the JSON object
+"""
+        else:
+            # Default template for general summarization
+            template = """Extract key information from the following text:
+
+Text: {text}
+
+Please provide a structured summary including:
+- Title of the document
+- Main research objectives
+- Methodology used
+- Key findings
+- Conclusions
+
+Format your response as a JSON object with these standard fields.
+Skip the References section when generating the summary.
+"""
+
+        prompt = PromptTemplate(
+            template=template,
+            input_variables=["text", "variables"] if variables else ["text"],
+        )
+
+        llm = ChatOpenAI(temperature=0, model_name="gpt-4o-mini")
+        chain = load_summarize_chain(
+            llm, chain_type="stuff", prompt=prompt, verbose=False
+        )
+
+        # Prepare chain input
+        chain_input = {"input_documents": chunks}
+
+        # If variables are provided, add them to the chain input
+        if variables:
+            chain_input["variables"] = self.formatted_vars
+
+        response = chain.invoke(chain_input)
+
+        # Ensure the JSON response includes all requested variables
+        if variables and "output_text" in response:
+            try:
+                json_data = self.extract_json_from_text(response["output_text"])
+                # Add any missing variables with null values
+                for var in self.var_list:
+                    if var not in json_data:
+                        json_data[var] = None
+                # Re-format the response with the complete variable set
+                response["output_text"] = (
+                    f"```json\n{json.dumps(json_data, indent=2)}\n```"
+                )
+            except (ValueError, json.JSONDecodeError) as e:
+                logger.error(f"Error processing JSON response: {str(e)}")
+
+        return response
+
+    def extract_json_from_text(self, text):
+        """Extract JSON data from text output."""
+        json_match = re.search(r"```json\n({.*?})\n```", text, re.DOTALL)
+        if not json_match:
+            raise ValueError("No JSON content found in the text.")
+
+        json_str = json_match.group(1)
         try:
-            # Use DoclingReader for main content extraction
-            # reader = DoclingReader()
-            reader = PyMuPDFReader()
-            docs = reader.load(file_path)
-            text = "\n\n".join([d.get_content() for d in docs])
+            data = json.loads(json_str)
+        except json.JSONDecodeError:
+            data = {}
 
-            doc = fitz.open(file_path)
-            total_pages = len(doc)
+        return data
 
-            # Extract title from document
-            title = os.path.basename(file_path)
-            title_match = re.search(r"#+ (.+?)\n", text)
-            if title_match:
-                title = title_match.group(1).strip()
+    def create_basic_document_structure(self, file_path, pdf_data):
+        """Create a basic document structure when JSON extraction fails."""
+        doc = fitz.open(file_path)
 
-            # Extract abstract
-            abstract = ""
-            abstract_match = re.search(
-                r"Abstract:?(.*?)(?=\n\n|Keywords:|$)", text, re.DOTALL | re.IGNORECASE
-            )
-            if abstract_match:
-                abstract = abstract_match.group(1).strip()
+        # Extract basic metadata
+        title = os.path.basename(file_path)
+        content = "\n".join([page.get_text() for page in pdf_data])
 
-            # Extract authors
-            authors = []
-            author_section = re.search(r"\n(.*?)\n.*?Department", text)
-            if author_section:
-                author_text = author_section.group(1)
-                authors = [a.strip() for a in author_text.split(",") if a.strip()]
+        # Try to extract title from first page
+        first_page_text = doc[0].get_text()
+        title_match = re.search(r"^(.+?)\n", first_page_text)
+        if title_match:
+            title = title_match.group(1).strip()
 
-            # Remove references section
-            content = text
-            ref_patterns = [r"\nReferences\n", r"\nBibliography\n", r"\nWorks Cited\n"]
-            for pattern in ref_patterns:
-                split_text = re.split(pattern, content, flags=re.IGNORECASE)
-                if len(split_text) > 1:
-                    content = split_text[0]
-                    break
-
-            # Map content to pages using PyMuPDF for accurate page numbers
-            pages = {}
-            for page_num in range(total_pages):
-                page = doc[page_num]
-                page_text = page.get_text()
-
-                # Skip if this appears to be a references page
-                if self.is_references_page(page_text):
-                    logger.info(f"Skipping references page {page_num}")
-                    continue
-
-                # Look for this page's content in the Docling-extracted text
-                # This is a heuristic approach - we look for unique phrases from the page
-                key_phrases = self._get_key_phrases(page_text)
-                page_content = self._find_matching_content(content, key_phrases)
-
-                if page_content:
-                    pages[str(page_num)] = {
-                        "text": page_content,
-                        "page_number": page_num
-                        + 1,  # 1-based page numbers for human readability
-                    }
-
-            # Create structured document with page-aware content
-            document = {
-                "title": title,
-                "authors": authors,
-                "date": "",  # Could be extracted if needed
-                "abstract": abstract,
-                "full_text": content,
-                "source_file": file_path,
-                "pages": pages,
-                "page_count": total_pages,
-                "content_pages": len(pages),  # Number of non-reference pages
-            }
-
-            doc.close()
-            return document
-
-        except Exception as e:
-            logger.error(f"Error processing PDF {file_path}: {str(e)}")
-            raise
-
-    def _get_key_phrases(self, text: str, phrase_length: int = 10) -> List[str]:
-        """Extract key phrases from text for matching."""
-        words = text.split()
-        phrases = []
-        for i in range(0, len(words), phrase_length):
-            phrase = " ".join(words[i : i + phrase_length])
-            if len(phrase.strip()) > 20:  # Only use substantial phrases
-                phrases.append(phrase)
-        return phrases
-
-    def _find_matching_content(
-        self, docling_text: str, key_phrases: List[str]
-    ) -> Optional[str]:
-        """Find the corresponding content in Docling text using key phrases."""
-        for phrase in key_phrases:
-            if phrase in docling_text:
-                # Find the paragraph or section containing this phrase
-                paragraphs = docling_text.split("\n\n")
-                for para in paragraphs:
-                    if phrase in para:
-                        return para
-        return None
+        return {
+            "title": title,
+            "source_file": file_path,
+            "content": content,
+            "page_count": len(doc),
+            "processed_date": datetime.datetime.now().isoformat(),
+        }

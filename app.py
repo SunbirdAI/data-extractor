@@ -367,28 +367,34 @@ def download_as_csv(df):
 # ---------------------------
 
 
-def handle_pdf_upload(files, name):
+def handle_pdf_upload(files, name, variables=""):
     """
     Process the uploaded PDF files and add them to the system.
 
     Args:
-        files (List[gr.File]): List of uploaded PDF files.
-        name (str): Name for the PDF collection.
+        files (List[gr.File]): List of uploaded PDF files
+        name (str): Name for the PDF collection
+        variables (str): Optional comma-separated list of variables to extract
 
     Returns:
-        Tuple[str, str]: A status message and the collection ID.
+        Tuple[str, str]: Status message and collection ID
     """
     if not name:
         return "Please provide a collection name", None
     if not files:
         return "Please select PDF files", None
+
     try:
         processor = PDFProcessor()
-        output_path = processor.process_pdfs(files, name)
+        # Process PDFs with variables if provided
+        output_path = processor.process_pdfs(files, name, variables)
         collection_id = f"pdf_{slugify(name)}"
+
+        # Add to study files and ChromaDB
         append_to_study_files("study_files.json", collection_id, output_path)
         add_study_files_to_chromadb("study_files.json", "study_files_collection")
         add_study_files_to_db("study_files.json", "local")
+
         return (
             f"Successfully processed PDFs into collection: {collection_id}",
             collection_id,
@@ -400,17 +406,15 @@ def handle_pdf_upload(files, name):
 
 def process_pdf_query(variable_text: str, collection_id: str) -> tuple:
     """
-    Process a PDF query by reading the JSON file corresponding to the PDF collection
-    and filtering it based on the variables provided.
+    Process a PDF query with variables.
 
     Args:
-        variable_text (str): Comma-separated list of variables to display.
-        collection_id (str): The identifier of the PDF collection.
+        variable_text (str): Comma-separated list of variables to extract
+        collection_id (str): The identifier of the PDF collection
 
     Returns:
-        Tuple[pd.DataFrame, any]: A DataFrame with the query results and a Gradio update for the download button.
+        Tuple[pd.DataFrame, any]: Query results and download button update
     """
-    variable_list = [word.strip() for word in variable_text.split(",") if word.strip()]
     if not collection_id:
         return pd.DataFrame(
             {"Error": ["No PDF collection uploaded. Please upload PDFs first."]}
@@ -422,20 +426,25 @@ def process_pdf_query(variable_text: str, collection_id: str) -> tuple:
             {"Error": [f"Collection '{collection_id}' not found."]}
         ), gr.update(visible=False)
 
-    file_path = study.file_path
     try:
+        # Re-process the PDFs with the new variables
+        processor = PDFProcessor()
+        file_path = study.file_path
+
         with open(file_path, "r") as f:
             data = json.load(f)
-        df = pd.DataFrame(data)
 
-        if variable_list:
-            available_vars = [var for var in variable_list if var in df.columns]
-            if available_vars:
-                df = df[available_vars]
-            else:
-                df = pd.DataFrame(
-                    {"Message": ["None of the requested variables are available."]}
-                )
+        # If variables specified, filter the data
+        if variable_text:
+            variable_list = [v.strip() for v in variable_text.split(",")]
+            filtered_data = []
+            for doc in data:
+                filtered_doc = {k: v for k, v in doc.items() if k in variable_list}
+                if filtered_doc:
+                    filtered_data.append(filtered_doc)
+            data = filtered_data
+
+        df = pd.DataFrame(data)
         return df, gr.update(visible=True)
     except Exception as e:
         logger.error(f"Error processing PDF query: {str(e)}")
