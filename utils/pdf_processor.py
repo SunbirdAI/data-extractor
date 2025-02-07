@@ -41,10 +41,17 @@ def chunk_data(data, chunk_size=256, chunk_overlap=20):
 
 
 class PDFProcessor:
-    def __init__(self, upload_dir: str = "data/uploads"):
+    def __init__(
+        self,
+        upload_dir: str = "data/uploads",
+        chunk_size: int = 4000,
+        chunk_overlap: int = 200,
+    ):
         self.upload_dir = upload_dir
         self.var_list = []
         self.formatted_vars = ""
+        self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
         os.makedirs(upload_dir, exist_ok=True)
 
     def is_references_page(self, text: str) -> bool:
@@ -97,15 +104,14 @@ class PDFProcessor:
         self.prepare_variables(variables)
 
         processed_docs = []
-        chunk_size = 10000
-        chunk_overlap = 100
-
         for file_path in file_paths:
             try:
                 # Load and chunk the document
                 pdf_data = load_document(file_path)
                 pdf_chunks = chunk_data(
-                    pdf_data, chunk_size=chunk_size, chunk_overlap=chunk_overlap
+                    pdf_data,
+                    chunk_size=self.chunk_size,
+                    chunk_overlap=self.chunk_overlap,
                 )
 
                 # Generate summary using the stuff chain

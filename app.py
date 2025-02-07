@@ -385,7 +385,9 @@ def handle_pdf_upload(files, name, variables=""):
         return "Please select PDF files", None
 
     try:
-        processor = PDFProcessor()
+        # Initialize processor with larger chunk size for better context
+        processor = PDFProcessor(chunk_size=4000, chunk_overlap=200)
+
         # Process PDFs with variables if provided
         output_path = processor.process_pdfs(files, name, variables)
         collection_id = f"pdf_{slugify(name)}"
@@ -427,21 +429,22 @@ def process_pdf_query(variable_text: str, collection_id: str) -> tuple:
         ), gr.update(visible=False)
 
     try:
-        # Re-process the PDFs with the new variables
-        processor = PDFProcessor()
+        # Read the existing JSON file
         file_path = study.file_path
-
         with open(file_path, "r") as f:
             data = json.load(f)
 
         # If variables specified, filter the data
         if variable_text:
-            variable_list = [v.strip() for v in variable_text.split(",")]
+            variable_list = [v.strip().upper() for v in variable_text.split(",")]
             filtered_data = []
             for doc in data:
-                filtered_doc = {k: v for k, v in doc.items() if k in variable_list}
-                if filtered_doc:
-                    filtered_data.append(filtered_doc)
+                filtered_doc = {}
+                for var in variable_list:
+                    # Add the variable to filtered_doc even if it's not in the original
+                    # This ensures all requested variables appear in the output
+                    filtered_doc[var] = doc.get(var)
+                filtered_data.append(filtered_doc)
             data = filtered_data
 
         df = pd.DataFrame(data)
@@ -569,6 +572,11 @@ def create_gr_interface() -> gr.Blocks:
                         )
                     # Right column: PDF upload and processing
                     with gr.Column(scale=3):
+                        upload_variables = gr.Textbox(
+                            label="Initial Variables",
+                            placeholder="Optional: Variables to extract during upload",
+                            lines=1,
+                        )
                         with gr.Row():
                             pdf_files = gr.File(
                                 file_count="multiple",
@@ -589,7 +597,7 @@ def create_gr_interface() -> gr.Blocks:
                 # Event handler for processing PDF uploads.
                 upload_btn.click(
                     handle_pdf_upload,
-                    inputs=[pdf_files, collection_name],
+                    inputs=[pdf_files, collection_name, upload_variables],
                     outputs=[pdf_status, current_collection],
                 )
 
