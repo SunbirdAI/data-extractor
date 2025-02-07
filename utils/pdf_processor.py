@@ -14,6 +14,8 @@ from typing import Dict, List, Optional
 
 import fitz
 from llama_index.readers.docling import DoclingReader
+from llama_index.readers.file import PyMuPDFReader
+
 from PIL import Image
 from slugify import slugify
 
@@ -121,11 +123,11 @@ class PDFProcessor:
         """
         try:
             # Use DoclingReader for main content extraction
-            reader = DoclingReader()
-            documents = reader.load_data(file_path)
-            text = documents[0].text if documents else ""
+            # reader = DoclingReader()
+            reader = PyMuPDFReader()
+            docs = reader.load(file_path)
+            text = "\n\n".join([d.get_content() for d in docs])
 
-            # Use PyMuPDF to get accurate page count
             doc = fitz.open(file_path)
             total_pages = len(doc)
 
