@@ -2,6 +2,7 @@
 
 import csv
 import datetime
+
 # from datetime import datetime
 import io
 import json
@@ -220,9 +221,6 @@ def chat_function(
         df = process_multiple_pdfs(
             attachments, variables, stuff_summarise_document_data_json
         )
-        # df = process_multiple_pdfs(
-        #     attachments, variables, map_reduce_summarise_document_data_json
-        # )
 
         df = update_summary_columns(df)
         msg = export_dataframe_to_csv(df, f"zotero_data/{study_name}.csv")
@@ -364,87 +362,110 @@ def download_as_csv(df):
     return temp_path
 
 
-# PDF Support
-def process_pdf_uploads(files: List[gr.File], collection_name: str) -> str:
-    """Process uploaded PDF files and add them to the system."""
-    if not files or not collection_name:
-        return "Please upload PDF files and provide a collection name"
+# ---------------------------
+# PDF Upload and Query Functions
+# ---------------------------
+
+
+def handle_pdf_upload(files, name, variables=""):
+    """
+    Process the uploaded PDF files and add them to the system.
+
+    Args:
+        files (List[gr.File]): List of uploaded PDF files
+        name (str): Name for the PDF collection
+        variables (str): Optional comma-separated list of variables to extract
+
+    Returns:
+        Tuple[str, str]: Status message and collection ID
+    """
+    if not name:
+        return "Please provide a collection name", None
+    if not files:
+        return "Please select PDF files", None
 
     try:
-        processor = PDFProcessor()
+        # Initialize processor with larger chunk size for better context
+        processor = PDFProcessor(chunk_size=4000, chunk_overlap=200)
 
-        # Save uploaded files temporarily
-        file_paths = []
-        for file in files:
-            # Get the actual file path from the Gradio File object
-            if hasattr(file, "name"):  # If it's already a path
-                temp_path = file.name
-            else:  # If it needs to be saved
-                temp_path = os.path.join(processor.upload_dir, file.orig_name)
-                file.save(temp_path)
-            file_paths.append(temp_path)
-
-        # Process PDFs
-        output_path = processor.process_pdfs(file_paths, collection_name)
+        # Process PDFs with variables if provided
+        output_path = processor.process_pdfs(files, name, variables)
+        collection_id = f"pdf_{slugify(name)}"
 
         # Add to study files and ChromaDB
-        collection_id = f"pdf_{slugify(collection_name)}"
         append_to_study_files("study_files.json", collection_id, output_path)
         add_study_files_to_chromadb("study_files.json", "study_files_collection")
+        add_study_files_to_db("study_files.json", "local")
 
-        # Cleanup temporary files if they were created by us
-        for path in file_paths:
-            if path.startswith(processor.upload_dir):
-                try:
-                    os.remove(path)
-                except Exception as e:
-                    logger.warning(f"Failed to remove temporary file {path}: {e}")
-
-        return f"Successfully processed PDFs into collection: {collection_id}"
-
+        return (
+            f"Successfully processed PDFs into collection: {collection_id}",
+            collection_id,
+        )
     except Exception as e:
-        logger.error(f"Error in process_pdf_uploads: {str(e)}")
-        return f"Error processing PDF files: {str(e)}"
+        logger.error(f"Error in handle_pdf_upload: {str(e)}")
+        return f"Error: {str(e)}", None
 
 
-def chat_response(
-    message: str,
-    history: List[Tuple[str, str]],
-    study_name: str,
-    pdf_processor: PDFProcessor,
-) -> Tuple[List[Tuple[str, str]], str, Any]:
-    """Generate chat response and update history."""
-    if not message.strip():
-        return history, None, None
+def process_pdf_query(variable_text: str, collection_id: str) -> tuple:
+    """
+    Process a PDF query with variables.
 
-    rag = get_rag_pipeline(study_name)
-    response, source_info = rag.query(message)
-    history.append((message, response))
+    Args:
+        variable_text (str): Comma-separated list of variables to extract
+        collection_id (str): The identifier of the PDF collection
 
-    # Generate PDF preview if source information is available
-    # preview_image = None
-    if (
-        source_info
-        and source_info.get("source_file")
-        and source_info.get("page_numbers")
-    ):
-        try:
-            # Get the first page number from the source
-            page_num = source_info["page_numbers"][0]
-        except Exception as e:
-            logger.error(f"Error generating PDF preview: {str(e)}")
+    Returns:
+        Tuple[pd.DataFrame, any]: Query results and download button update
+    """
+    if not collection_id:
+        return pd.DataFrame(
+            {"Error": ["No PDF collection uploaded. Please upload PDFs first."]}
+        ), gr.update(visible=False)
 
-    return history
+    study = get_study_file_by_name(collection_id)
+    if not study:
+        return pd.DataFrame(
+            {"Error": [f"Collection '{collection_id}' not found."]}
+        ), gr.update(visible=False)
+
+    try:
+        # Read the existing JSON file
+        file_path = study.file_path
+        with open(file_path, "r") as f:
+            data = json.load(f)
+
+        # If variables specified, filter the data
+        if variable_text:
+            variable_list = [v.strip().upper() for v in variable_text.split(",")]
+            filtered_data = []
+            for doc in data:
+                filtered_doc = {}
+                for var in variable_list:
+                    # Add the variable to filtered_doc even if it's not in the original
+                    # This ensures all requested variables appear in the output
+                    filtered_doc[var] = doc.get(var)
+                filtered_data.append(filtered_doc)
+            data = filtered_data
+
+        df = pd.DataFrame(data)
+        return df, gr.update(visible=True)
+    except Exception as e:
+        logger.error(f"Error processing PDF query: {str(e)}")
+        return pd.DataFrame({"Error": [str(e)]}), gr.update(visible=False)
+
+
+# ---------------------------
+# Main Gradio Interface Function
+# ---------------------------
 
 
 def create_gr_interface() -> gr.Blocks:
-    """Create and configure the Gradio interface for the RAG platform."""
-    global zotero_library_id
+    """Create and configure the Gradio interface for the ACRES RAG Platform."""
     with gr.Blocks(theme=gr.themes.Base()) as demo:
         gr.Markdown("# ACRES RAG Platform")
 
         with gr.Tabs() as tabs:
-            # Tab 1: Original Study Analysis Interface
+            # ----- Tab 1: Study Analysis Interface -----
             with gr.Tab("Study Analysis"):
                 with gr.Row():
                     with gr.Column(scale=1):
@@ -467,23 +488,14 @@ def create_gr_interface() -> gr.Blocks:
                         )
 
                         gr.Markdown("### Study Information")
-
-                        zotero_library_id = zotero_library_id_param.value
-                        if zotero_library_id is None:
-                            zotero_library_id = get_cache_value("zotero_library_id")
-                        logger.info(f"zotero_library_id: =====> {zotero_library_id}")
                         study_choices = refresh_study_choices()
-                        logger.info(f"study_choices_db: =====> {study_choices}")
-
                         study_dropdown = gr.Dropdown(
                             choices=study_choices,
                             label="Select Study",
                             value=(study_choices[0] if study_choices else None),
                             allow_custom_value=True,
                         )
-                        # In Gradio interface setup
                         refresh_button = gr.Button("Refresh Studies")
-
                         study_info = gr.Markdown(label="Study Details")
                         new_studies = gr.Markdown(label="Your Studies")
                         prompt_type = gr.Radio(
@@ -497,7 +509,7 @@ def create_gr_interface() -> gr.Blocks:
                             outputs=[zotero_library_id_param],
                         )
                         def load_from_local_storage(saved_values):
-                            print("loading from local storage", saved_values)
+                            logger.info(f"Loading from local storage: {saved_values}")
                             return saved_values.get("zotero_library_id")
 
                         @gr.on(
@@ -521,7 +533,7 @@ def create_gr_interface() -> gr.Blocks:
                         with gr.Row():
                             study_variables = gr.Textbox(
                                 show_label=False,
-                                placeholder="Type your variables separated by commas e.g (Study ID, Study Title, Authors etc)",
+                                placeholder="Type your variables separated by commas e.g. (Study ID, Study Title, Authors etc)",
                                 scale=4,
                                 lines=1,
                                 autofocus=True,
@@ -536,31 +548,34 @@ def create_gr_interface() -> gr.Blocks:
                             visible=False,
                         )
 
-            # Tab 2: PDF Chat Interface
-            with gr.Tab("PDF Chat"):
-                pdf_processor = PDFProcessor()
-
+            # ----- Tab 2: PDF Query Interface -----
+            with gr.Tab("PDF Query"):
                 with gr.Row():
-                    # Left column: Chat and Input
+                    # Left column: PDF query interface
                     with gr.Column(scale=7):
-                        chat_history = gr.Chatbot(
-                            value=[], height=600, show_label=False
+                        gr.Markdown("### PDF Query Variables")
+                        pdf_variables = gr.Textbox(
+                            show_label=False,
+                            placeholder="Type your variables separated by commas (e.g., Title, Author, Date)",
+                            scale=8,
+                            lines=1,
+                            autofocus=True,
                         )
-                        with gr.Row():
-                            query_input = gr.Textbox(
-                                show_label=False,
-                                placeholder="Ask a question about your PDFs...",
-                                scale=8,
-                            )
-                            chat_submit_btn = gr.Button(
-                                "Send", scale=2, variant="primary"
-                            )
-
-                    # Right column: PDF Preview and Upload
+                        pdf_submit_btn = gr.Button("Submit", scale=2)
+                        pdf_answer_output = gr.DataFrame(label="Answer")
+                        pdf_download_btn = gr.DownloadButton(
+                            "Download as CSV",
+                            variant="primary",
+                            size="sm",
+                            scale=1,
+                            visible=False,
+                        )
+                    # Right column: PDF upload and processing
                     with gr.Column(scale=3):
-                        # pdf_preview = gr.Image(label="Source Page", height=600)
-                        source_info = gr.Markdown(
-                            label="Sources", value="No sources available yet."
+                        upload_variables = gr.Textbox(
+                            label="Initial Variables",
+                            placeholder="Optional: Variables to extract during upload",
+                            lines=1,
                         )
                         with gr.Row():
                             pdf_files = gr.File(
@@ -576,9 +591,31 @@ def create_gr_interface() -> gr.Blocks:
                         with gr.Row():
                             upload_btn = gr.Button("Process PDFs", variant="primary")
                         pdf_status = gr.Markdown()
+                        # State to hold the collection ID after upload.
                         current_collection = gr.State(value=None)
 
-        # Event handlers for Study Analysis tab
+                # Event handler for processing PDF uploads.
+                upload_btn.click(
+                    handle_pdf_upload,
+                    inputs=[pdf_files, collection_name, upload_variables],
+                    outputs=[pdf_status, current_collection],
+                )
+
+                # Event handler for processing the PDF query.
+                pdf_submit_btn.click(
+                    process_pdf_query,
+                    inputs=[pdf_variables, current_collection],
+                    outputs=[pdf_answer_output, pdf_download_btn],
+                )
+
+                # Download button handler.
+                pdf_download_btn.click(
+                    fn=download_as_csv,
+                    inputs=[pdf_answer_output],
+                    outputs=[pdf_download_btn],
+                ).then(fn=cleanup_temp_files, inputs=None, outputs=None)
+
+        # ----- Event Handlers for the Study Analysis Tab -----
         process_zotero_btn.click(
             process_zotero_library_items,
             inputs=[zotero_library_id_param, zotero_api_access_key],
@@ -601,159 +638,7 @@ def create_gr_interface() -> gr.Blocks:
 
         refresh_button.click(
             fn=new_study_choices,
-            outputs=[new_studies],  # Update the same dropdown
-        )
-
-        # Event handlers for PDF Chat tab
-
-        def handle_pdf_upload(files, name):
-            if not name:
-                return "Please provide a collection name", None
-            if not files:
-                return "Please select PDF files", None
-
-            try:
-                processor = PDFProcessor()
-                # Process PDFs
-                output_path = processor.process_pdfs(files, name)
-                collection_id = f"pdf_{slugify(name)}"
-
-                # Add to study files JSON
-                append_to_study_files("study_files.json", collection_id, output_path)
-
-                # Add to ChromaDB
-                add_study_files_to_chromadb(
-                    "study_files.json", "study_files_collection"
-                )
-
-                # Add to SQLite database - this is the crucial missing step
-                add_study_files_to_db(
-                    "study_files.json", "local"
-                )  # Add library_id parameter
-
-                return (
-                    f"Successfully processed PDFs into collection: {collection_id}",
-                    collection_id,
-                )
-            except Exception as e:
-                logger.error(f"Error in handle_pdf_upload: {str(e)}")
-                return f"Error: {str(e)}", None
-
-        def add_message(history, message):
-            """Add user message to chat history."""
-            if not message.strip():
-                raise gr.Error("Please enter a message")
-            history = history + [(message, None)]
-            return history, "", None
-
-        def format_source_info(source_nodes) -> str:
-            """Format source information into a markdown string."""
-            if not source_nodes:
-                return "No source information available"
-
-            sources_md = "### Sources\n\n"
-            seen_sources = set()  # To track unique sources
-
-            for idx, node in enumerate(source_nodes, 1):
-                metadata = node.metadata
-                if not metadata:
-                    continue
-
-                source_key = (
-                    metadata.get("source_file", ""),
-                    metadata.get("page_number", 0),
-                )
-                if source_key in seen_sources:
-                    continue
-
-                seen_sources.add(source_key)
-                title = metadata.get(
-                    "title", os.path.basename(metadata.get("source_file", "Unknown"))
-                )
-                page = metadata.get("page_number", "N/A")
-
-                sources_md += f"{idx}. **{title}** - Page {page}\n"
-
-            return sources_md
-
-        def generate_chat_response(history, collection_id, pdf_processor):
-            """Generate response for the last message in history."""
-            if not collection_id:
-                raise gr.Error("Please upload PDFs first")
-            if len(history) == 0:
-                return history, None
-
-            last_message = history[-1][0]
-            try:
-                # Get response and source info
-                rag = get_rag_pipeline(collection_id)
-                response_text, source_nodes = rag.query(last_message)
-
-                # Format sources info
-                sources_md = "### Top Sources\n\n"
-                if source_nodes and len(source_nodes) > 0:
-                    seen_sources = set()
-                    source_count = 0
-
-                    # Only process up to 3 sources
-                    for node in source_nodes:
-                        if source_count >= 3:  # Stop after 3 sources
-                            break
-
-                        if not hasattr(node, "metadata"):
-                            continue
-
-                        metadata = node.metadata
-                        source_key = (
-                            metadata.get("source_file", ""),
-                            metadata.get("page_number", 0),
-                        )
-
-                        if source_key in seen_sources:
-                            continue
-
-                        seen_sources.add(source_key)
-                        source_count += 1
-
-                        title = metadata.get("title", "Unknown")
-                        if not title or title == "Unknown":
-                            title = os.path.basename(
-                                metadata.get("source_file", "Unknown Document")
-                            )
-
-                        page = metadata.get("page_number", "N/A")
-                        sources_md += f"{source_count}. **{title}** - Page {page}\n"
-
-                    if source_count == 0:
-                        sources_md = "No source information available"
-                else:
-                    sources_md = "No source information available"
-
-                # Update history with response
-                history[-1] = (last_message, response_text)
-                return history, sources_md
-
-            except Exception as e:
-                logger.error(f"Error in generate_chat_response: {str(e)}")
-                history[-1] = (last_message, f"Error: {str(e)}")
-                return history, "Error retrieving sources"
-
-        # Update PDF event handlers
-        upload_btn.click(  # Change from pdf_files.upload to upload_btn.click
-            handle_pdf_upload,
-            inputs=[pdf_files, collection_name],
-            outputs=[pdf_status, current_collection],
-        )
-
-        # Fixed chat event handling
-        chat_submit_btn.click(
-            add_message,
-            inputs=[chat_history, query_input],
-            outputs=[chat_history, query_input],
-        ).success(
-            generate_chat_response,
-            inputs=[chat_history, current_collection],
-            outputs=[chat_history, source_info],
+            outputs=[new_studies],
         )
 
     return demo

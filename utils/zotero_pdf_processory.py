@@ -1,3 +1,4 @@
+# utils/zotero_pdf_processor.py
 import json
 import logging
 import os
@@ -9,9 +10,15 @@ import requests
 from langchain import PromptTemplate
 from langchain.chains.summarize import load_summarize_chain
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.document_loaders import Docx2txtLoader
+from langchain_community.document_loaders import TextLoader
+from langchain_community.document_loaders import PyPDFLoader
 from langchain_openai import ChatOpenAI
 from pyzotero.zotero_errors import HTTPError
 from slugify import slugify
+import tiktoken
+from typing import List, Optional
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -19,7 +26,6 @@ logger = logging.getLogger(__name__)
 
 
 def print_embedding_cost(texts):
-    import tiktoken
 
     enc = tiktoken.encoding_for_model("text-embedding-3-small")
     total_tokens = sum([len(enc.encode(page.page_content)) for page in texts])
@@ -28,29 +34,18 @@ def print_embedding_cost(texts):
 
 
 # loading PDF, DOCX and TXT files as LangChain Documents
-def load_document(file):
-    name, extension = os.path.splitext(file)
+def load_document(file: str) -> Optional[List]:
+    loaders = {".pdf": PyPDFLoader, ".docx": Docx2txtLoader, ".txt": TextLoader}
 
-    if extension == ".pdf":
-        from langchain_community.document_loaders import PyPDFLoader
+    extension = os.path.splitext(file)[1].lower()
 
-        print(f"Loading {file}")
-        loader = PyPDFLoader(file)
-    elif extension == ".docx":
-        from langchain_community.document_loaders import Docx2txtLoader
+    if extension not in loaders:
+        raise ValueError(f"Unsupported document format: {extension}")
 
-        print(f"Loading {file}")
-        loader = Docx2txtLoader(file)
-    elif extension == ".txt":
-        from langchain_community.document_loaders import TextLoader
+    print(f"Loading {file}")
+    loader = loaders[extension](file)
 
-        loader = TextLoader(file)
-    else:
-        print("Document format is not supported!")
-        return None
-
-    data = loader.load()
-    return data
+    return loader.load()
 
 
 def extract_json_from_text(text):
