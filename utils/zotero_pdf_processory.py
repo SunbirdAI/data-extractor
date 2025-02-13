@@ -4,25 +4,36 @@ import logging
 import os
 import re
 import traceback
+from typing import List, Optional
 
 import pandas as pd
 import requests
+import tiktoken
 from langchain import PromptTemplate
+from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain.chains.summarize import load_summarize_chain
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.document_loaders import Docx2txtLoader
-from langchain_community.document_loaders import TextLoader
-from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.document_loaders import Docx2txtLoader, PyPDFLoader, TextLoader
+from langchain_core.prompts import (
+    ChatPromptTemplate,
+    HumanMessagePromptTemplate,
+    SystemMessagePromptTemplate,
+)
 from langchain_openai import ChatOpenAI
+from openai import OpenAI
 from pyzotero.zotero_errors import HTTPError
 from slugify import slugify
-import tiktoken
-from typing import List, Optional
-
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def num_tokens_from_string(string: str, encoding_name: str = "gpt-4o-mini") -> int:
+    """Returns the number of tokens in a text string."""
+    encoding = tiktoken.encoding_for_model(encoding_name)
+    num_tokens = len(encoding.encode(string))
+    return num_tokens
 
 
 def print_embedding_cost(texts):
@@ -35,17 +46,73 @@ def print_embedding_cost(texts):
 
 # loading PDF, DOCX and TXT files as LangChain Documents
 def load_document(file: str) -> Optional[List]:
-    loaders = {".pdf": PyPDFLoader, ".docx": Docx2txtLoader, ".txt": TextLoader}
+    docs = []
+    try:
+        loaders = {".pdf": PyPDFLoader, ".docx": Docx2txtLoader, ".txt": TextLoader}
 
-    extension = os.path.splitext(file)[1].lower()
+        extension = os.path.splitext(file)[1].lower()
 
-    if extension not in loaders:
-        raise ValueError(f"Unsupported document format: {extension}")
+        if extension not in loaders:
+            raise ValueError(f"Unsupported document format: {extension}")
 
-    print(f"Loading {file}")
-    loader = loaders[extension](file)
+        print(f"Loading {file}")
+        loader = loaders[extension](file)
+        docs = loader.load()
+    except Exception as e:
+        logger.error(str(e))
+        docs = []
 
-    return loader.load()
+    return docs
+
+
+def extract_variables(text: str, variables: str, model="gpt-4o-mini"):
+    """
+    Extracts specified variables from the given text using OpenAI's GPT model.
+
+    Args:
+        text (str): The input text from which variables should be extracted.
+        variables (str): A comma-separated string of variable names to extract.
+        model (str): The OpenAI model to use (default is gpt-4).
+
+    Returns:
+        str: A JSON string containing only the extracted variables.
+    """
+
+    prompt = f"""
+    Extract the following variables from the given text and return them in JSON format:
+    Variables: {variables}
+
+    Text:
+    {text}
+
+    Important:
+    - The JSON output should contain only the extracted variables.
+    - No extra text, comments, or formatting outside the JSON.
+    - Do not ```json ``` code fences around the returned json data.
+    - Do not return variable names if they are not found in the text.
+    """
+
+    client = OpenAI()
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {
+                "role": "system",
+                "content": "You are an expert in structured data extraction.",
+            },
+            {"role": "user", "content": prompt},
+        ],
+    )
+
+    # Extract JSON output from the response
+    extracted_data = response.choices[0].message.content.strip()
+
+    try:
+        # Ensure valid JSON
+        json.loads(extracted_data)
+        return extracted_data
+    except json.JSONDecodeError:
+        return "{}"  # Return an empty JSON if parsing fails
 
 
 def extract_json_from_text(text):
@@ -58,16 +125,8 @@ def extract_json_from_text(text):
     Returns:
         dict: A dictionary representation of the JSON data.
     """
-    # Extract the JSON part using a regular expression
-    json_match = re.search(r"```json\n({.*?})\n```", text, re.DOTALL)
-    if not json_match:
-        raise ValueError("No JSON content found in the text.")
-
-    json_str = json_match.group(1)
-
-    # Parse the JSON string into a Python dictionary
     try:
-        data = json.loads(json_str)
+        data = json.loads(text)
     except json.JSONDecodeError as e:
         # raise ValueError(f"Invalid JSON content: {e}")
         data = {}
@@ -129,18 +188,21 @@ def process_multiple_pdfs(
     for file_path in file_paths:
         # Load the PDF document
         pdf_data = load_document(file_path)
+        if not pdf_data:
+            continue
 
         # Split the PDF data into chunks
         pdf_chunks = chunk_data(
             pdf_data, chunk_size=chunk_size, chunk_overlap=chunk_overlap
         )
 
-        # Summarize the document data into JSON format
-        output_summary_json = summarization_function(pdf_chunks, variables)
-        # logger.info(f"Summary json: {output_summary_json['output_text']}")
+        # Summarize the document data
+        output_summary = summarization_function(pdf_chunks, variables)
+        # logger.info(f"Summary text: {output_summary_json}")
 
         # Extract JSON data from the summary text
-        json_data = extract_json_from_text(output_summary_json["output_text"])
+        json_text = extract_variables(output_summary, variables)
+        json_data = extract_json_from_text(json_text)
 
         # Convert JSON data to DataFrame
         if json_data:
@@ -446,6 +508,52 @@ def stuff_summarise_document_data_json(chunks, variables):
     return output_summary_json
 
 
+def stuff_summarise_document_bullets(docs, variables):
+    system_prompt = """
+    You are an expert research document summarizer. Your goal is to read and summarize 
+    the content of the provided text in a structured, bullet-point format 
+    focusing on the user’s specified study variables. After covering the main points, 
+    include a concluding statement if relevant.
+    
+    Guidelines:
+    • Present key findings or details as bullet points.
+    • Address each study variable the user provides, where possible.
+    • End with a concise conclusion or takeaway message.
+    • Do not produce JSON.
+    • Provide a readable, comprehensive summary in plain text.
+    """
+    user_prompt = """
+    Below is the text we need to summarize:
+    
+    {context}
+    
+    The user wants a comprehensive, bullet-point summary focusing on 
+    these study variables: {variables}
+    
+    - If a variable is not mentioned, you can either omit it or indicate 
+      that it was not discussed.
+    - Feel free to include any relevant details even if they do not fit 
+      strictly under a single variable.
+    - End with a concise conclusion or final takeaway.
+    """
+    human_message_template = PromptTemplate(
+        template=user_prompt, input_variables=["context", "variables"]
+    )
+
+    prompt = ChatPromptTemplate.from_messages(
+        [("system", system_prompt), ("human", human_message_template.template)]
+    )
+
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+
+    # Instantiate chain
+    chain = create_stuff_documents_chain(llm, prompt)
+
+    # Invoke chain
+    result = chain.invoke({"context": docs, "variables": variables})
+    return result
+
+
 def extract_redirection_location_from_traceback(traceback_text):
     """
     Extracts the redirection location URL from a traceback error message.
@@ -534,7 +642,7 @@ def down_zotero_collection_item_attachment_pdfs(
     zotero_manager, zotero_collection_items
 ):
     file_paths = []
-    for collection_item in zotero_collection_items[:10]:
+    for collection_item in zotero_collection_items:
         collection_item_children = zotero_manager.get_item_children(collection_item.key)
         if collection_item_children:
             key = collection_item_children[0]["key"]

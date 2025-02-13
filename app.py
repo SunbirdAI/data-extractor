@@ -2,7 +2,6 @@
 
 import csv
 import datetime
-
 # from datetime import datetime
 import io
 import json
@@ -43,8 +42,8 @@ from utils.zotero_pdf_processory import (
     export_dataframe_to_csv,
     get_zotero_collection_item_by_name,
     get_zotero_collection_items,
-    map_reduce_summarise_document_data_json,
     process_multiple_pdfs,
+    stuff_summarise_document_bullets,
     stuff_summarise_document_data_json,
     update_summary_columns,
 )
@@ -219,7 +218,7 @@ def chat_function(
     variables = ", ".join(variable_list)
     if attachments:
         df = process_multiple_pdfs(
-            attachments, variables, stuff_summarise_document_data_json
+            attachments, variables, stuff_summarise_document_bullets
         )
 
         df = update_summary_columns(df)
