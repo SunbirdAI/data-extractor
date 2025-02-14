@@ -1,18 +1,31 @@
 import json
 import logging
 import os
+import shutil
+from datetime import datetime
 from enum import Enum
 from typing import Any, List, Optional, Union
 
 import pandas as pd
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from gradio_client import Client
+from gradio_client import Client, handle_file
 from pydantic import BaseModel, ConfigDict, Field, constr
 
 from docs import description, tags_metadata
+from utils.zotero_pdf_processory import (
+    dataframe_to_markdown,
+    down_zotero_collection_item_attachment_pdfs,
+    export_dataframe_to_csv,
+    get_zotero_collection_item_by_name,
+    get_zotero_collection_items,
+    process_multiple_pdfs,
+    stuff_summarise_document_bullets,
+    stuff_summarise_document_data_json,
+    update_summary_columns,
+)
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -21,6 +34,11 @@ logger = logging.getLogger(__name__)
 GRADIO_URL = os.getenv("GRADIO_URL", "http://localhost:7860/")
 logger.info(f"GRADIO_URL: {GRADIO_URL}")
 client = Client(GRADIO_URL)
+
+UPLOAD_DIR = "zotero_data/uploads"
+
+# Create upload directory if it doesn't exist
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 app = FastAPI(
     title="ACRES RAG API",
@@ -76,6 +94,13 @@ class Study(BaseModel):
 class ZoteroCredentials(BaseModel):
     library_id: constr(min_length=1, strip_whitespace=True)  # type: ignore
     api_access_key: constr(min_length=1, strip_whitespace=True)  # type: ignore
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class UploadPdfFiles(BaseModel):
+    study_variables: constr(min_length=1, strip_whitespace=True)  # type: ignore
+    study_name: constr(min_length=1, strip_whitespace=True)  # type: ignore
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -153,6 +178,9 @@ def download_csv(payload: DownloadCSV):
     if not file_path or not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="File not found")
 
+    clean_up = client.predict(api_name="/cleanup_temp_files")
+    logger.info(clean_up)
+
     # Use FileResponse to send the file to the client
     return FileResponse(
         file_path,
@@ -161,3 +189,50 @@ def download_csv(payload: DownloadCSV):
             file_path
         ),  # Provide a default filename for the download
     )
+
+
+def save_upload_file(upload_file: UploadFile) -> str:
+    """Save an uploaded file to disk."""
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"{timestamp}_{upload_file.filename}"
+    file_path = os.path.join(UPLOAD_DIR, filename)
+
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(upload_file.file, buffer)
+
+    return file_path
+
+
+@app.post("/upload_and_process_pdf_files", tags=["zotero"])
+def handle_pdf_uploads(
+    study_name: str = Form(),
+    study_variables: str = Form(),
+    files: List[UploadFile] = File(...),
+):
+    uploaded_files = [save_upload_file(file) for file in files]
+
+    if uploaded_files:
+        df = process_multiple_pdfs(
+            uploaded_files, study_variables, stuff_summarise_document_bullets
+        )
+
+        df = update_summary_columns(df)
+        msg = export_dataframe_to_csv(df, f"zotero_data/{study_name}.csv")
+        logger.info(msg)
+        # markdown_table = dataframe_to_markdown(df)
+    else:
+        df = pd.DataFrame(
+            {"Attachments": ["Documents have no pdf attachements to process"]}
+        )
+
+    # result = client.predict(
+    #     files=[handle_file(file) for file in uploaded_files],
+    # 	name=study_name,
+    # 	variables=study_variables,
+    #     api_name="/handle_pdf_upload")
+
+    clean_up = client.predict(api_name="/cleanup_temp_files")
+    logger.info(clean_up)
+
+    return {"result": df.to_dict(orient="records")}
