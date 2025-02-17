@@ -2,7 +2,6 @@
 
 import csv
 import datetime
-
 # from datetime import datetime
 import io
 import json
@@ -43,8 +42,8 @@ from utils.zotero_pdf_processory import (
     export_dataframe_to_csv,
     get_zotero_collection_item_by_name,
     get_zotero_collection_items,
-    map_reduce_summarise_document_data_json,
     process_multiple_pdfs,
+    stuff_summarise_document_bullets,
     stuff_summarise_document_data_json,
     update_summary_columns,
 )
@@ -190,6 +189,7 @@ def cleanup_temp_files():
                         logger.warning(f"Failed to remove temp file {file}: {e}")
         logger.info("Cleaning up temporary files")
         delete_files_in_directory("zotero_data")
+        delete_files_in_directory("zotero_data/uploads")
     except Exception as e:
         logger.warning(f"Error during cleanup: {e}")
 
@@ -219,7 +219,7 @@ def chat_function(
     variables = ", ".join(variable_list)
     if attachments:
         df = process_multiple_pdfs(
-            attachments, variables, stuff_summarise_document_data_json
+            attachments, variables, stuff_summarise_document_bullets
         )
 
         df = update_summary_columns(df)
@@ -390,7 +390,8 @@ def handle_pdf_upload(files, name, variables=""):
 
         # Process PDFs with variables if provided
         output_path = processor.process_pdfs(files, name, variables)
-        collection_id = f"pdf_{slugify(name)}"
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        collection_id = f"pdf_{slugify(name)}_{timestamp}"
 
         # Add to study files and ChromaDB
         append_to_study_files("study_files.json", collection_id, output_path)
@@ -417,12 +418,14 @@ def process_pdf_query(variable_text: str, collection_id: str) -> tuple:
     Returns:
         Tuple[pd.DataFrame, any]: Query results and download button update
     """
+    logger.info(f"Collection ID: {collection_id}")
     if not collection_id:
         return pd.DataFrame(
             {"Error": ["No PDF collection uploaded. Please upload PDFs first."]}
         ), gr.update(visible=False)
 
     study = get_study_file_by_name(collection_id)
+    logger.info(f"Study: {study}")
     if not study:
         return pd.DataFrame(
             {"Error": [f"Collection '{collection_id}' not found."]}
@@ -431,12 +434,15 @@ def process_pdf_query(variable_text: str, collection_id: str) -> tuple:
     try:
         # Read the existing JSON file
         file_path = study.file_path
+        logger.info(f"File Path: {file_path}")
         with open(file_path, "r") as f:
             data = json.load(f)
+            # logger.info(f"Data: {data}")
 
         # If variables specified, filter the data
         if variable_text:
             variable_list = [v.strip().upper() for v in variable_text.split(",")]
+            logger.info(f"Variable list: {variable_list}")
             filtered_data = []
             for doc in data:
                 filtered_doc = {}
@@ -446,6 +452,7 @@ def process_pdf_query(variable_text: str, collection_id: str) -> tuple:
                     filtered_doc[var] = doc.get(var)
                 filtered_data.append(filtered_doc)
             data = filtered_data
+            # logger.info(f"Filtered Data: {filtered_data}")
 
         df = pd.DataFrame(data)
         return df, gr.update(visible=True)
