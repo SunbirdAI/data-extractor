@@ -549,8 +549,11 @@ def handle_pdf_uploads(
         df = process_multiple_pdfs(
             uploaded_files, study_variables, stuff_summarise_document_bullets
         )
+        df.fillna("Not Available", inplace=True)
+        logger.info(df)
 
         df = update_summary_columns(df)
+        logger.info(df)
         msg = export_dataframe_to_csv(df, f"zotero_data/{study_name}.csv")
         logger.info(msg)
     else:
