@@ -189,6 +189,7 @@ def cleanup_temp_files():
                         logger.warning(f"Failed to remove temp file {file}: {e}")
         logger.info("Cleaning up temporary files")
         delete_files_in_directory("zotero_data")
+        delete_files_in_directory("zotero_data/uploads")
     except Exception as e:
         logger.warning(f"Error during cleanup: {e}")
 
