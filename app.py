@@ -37,14 +37,12 @@ from utils.pdf_processor import PDFProcessor
 from utils.prompts import evidence_based_prompt, highlight_prompt
 from utils.zotero_manager import ZoteroManager
 from utils.zotero_pdf_processory import (
-    dataframe_to_markdown,
     down_zotero_collection_item_attachment_pdfs,
     export_dataframe_to_csv,
     get_zotero_collection_item_by_name,
     get_zotero_collection_items,
     process_multiple_pdfs,
     stuff_summarise_document_bullets,
-    stuff_summarise_document_data_json,
     update_summary_columns,
 )
 
