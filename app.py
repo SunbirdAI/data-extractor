@@ -2,6 +2,7 @@
 
 import csv
 import datetime
+
 # from datetime import datetime
 import io
 import json
@@ -383,16 +384,53 @@ def handle_pdf_upload(files, name, variables=""):
         return "Please select PDF files", None
 
     try:
-        # Initialize processor with larger chunk size for better context
-        processor = PDFProcessor(chunk_size=4000, chunk_overlap=200)
+        # Extract file paths from Gradio File objects
+        file_paths = [file.name for file in files]
 
-        # Process PDFs with variables if provided
-        output_path = processor.process_pdfs(files, name, variables)
+        # Store the original file paths for later reprocessing
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         collection_id = f"pdf_{slugify(name)}_{timestamp}"
 
+        # Create a metadata file that stores original file paths and variables
+        metadata = {
+            "name": name,
+            "timestamp": timestamp,
+            "file_paths": file_paths,
+            "initial_variables": variables,
+        }
+
+        os.makedirs("data", exist_ok=True)
+        metadata_path = f"data/{collection_id}_metadata.json"
+        with open(metadata_path, "w") as f:
+            json.dump(metadata, f, indent=2)
+
+        # Process PDFs with variables if provided
+        if variables:
+            # Process PDFs using the same approach as Zotero
+            df = process_multiple_pdfs(
+                file_paths, variables, stuff_summarise_document_bullets
+            )
+            df.fillna("Not Available", inplace=True)
+
+            # Update summary columns
+            df = update_summary_columns(df)
+
+            # Export to CSV
+            os.makedirs("zotero_data", exist_ok=True)
+            csv_output_path = f"zotero_data/{name}.csv"
+            msg = export_dataframe_to_csv(df, csv_output_path)
+            logger.info(msg)
+
+            # Export the dataframe to JSON
+            json_output_path = f"data/{collection_id}_data.json"
+            with open(json_output_path, "w", encoding="utf-8") as f:
+                json.dump(df.to_dict(orient="records"), f, indent=2, ensure_ascii=False)
+        else:
+            # If no variables specified, just create empty placeholder files
+            json_output_path = metadata_path
+
         # Add to study files and ChromaDB
-        append_to_study_files("study_files.json", collection_id, output_path)
+        append_to_study_files("study_files.json", collection_id, json_output_path)
         add_study_files_to_chromadb("study_files.json", "study_files_collection")
         add_study_files_to_db("study_files.json", "local")
 
@@ -430,30 +468,96 @@ def process_pdf_query(variable_text: str, collection_id: str) -> tuple:
         ), gr.update(visible=False)
 
     try:
-        # Read the existing JSON file
+        # Determine if we need to use initial variables or reprocess with new variables
         file_path = study.file_path
         logger.info(f"File Path: {file_path}")
-        with open(file_path, "r") as f:
-            data = json.load(f)
-            # logger.info(f"Data: {data}")
 
-        # If variables specified, filter the data
-        if variable_text:
-            variable_list = [v.strip().upper() for v in variable_text.split(",")]
-            logger.info(f"Variable list: {variable_list}")
-            filtered_data = []
-            for doc in data:
-                filtered_doc = {}
-                for var in variable_list:
-                    # Add the variable to filtered_doc even if it's not in the original
-                    # This ensures all requested variables appear in the output
-                    filtered_doc[var] = doc.get(var)
-                filtered_data.append(filtered_doc)
-            data = filtered_data
-            # logger.info(f"Filtered Data: {filtered_data}")
+        # Check if this is a metadata file or data file
+        is_metadata = "_metadata.json" in file_path
 
-        df = pd.DataFrame(data)
-        return df, gr.update(visible=True)
+        if is_metadata or not variable_text:
+            # We need to load the metadata and get the original file paths
+            if is_metadata:
+                metadata_path = file_path
+            else:
+                metadata_path = file_path.replace("_data.json", "_metadata.json")
+
+            try:
+                with open(metadata_path, "r") as f:
+                    metadata = json.load(f)
+                file_paths = metadata.get("file_paths", [])
+
+                if not file_paths:
+                    return pd.DataFrame(
+                        {"Error": ["Original PDF files not found"]}
+                    ), gr.update(visible=False)
+
+                # Use provided variables or initial variables if none provided
+                vars_to_use = (
+                    variable_text
+                    if variable_text
+                    else metadata.get("initial_variables", "")
+                )
+
+                if not vars_to_use:
+                    return pd.DataFrame(
+                        {"Error": ["Please specify variables to extract"]}
+                    ), gr.update(visible=False)
+
+                # Reprocess the PDFs with the new variables
+                logger.info(f"Reprocessing PDFs with variables: {vars_to_use}")
+                df = process_multiple_pdfs(
+                    file_paths, vars_to_use, stuff_summarise_document_bullets
+                )
+                df.fillna("Not Available", inplace=True)
+                df = update_summary_columns(df)
+
+                # Export to CSV with updated variables
+                name = metadata.get("name", collection_id)
+                os.makedirs("zotero_data", exist_ok=True)
+                csv_output_path = f"zotero_data/{name}_updated.csv"
+                export_dataframe_to_csv(df, csv_output_path)
+
+                # Update the data file
+                data_path = file_path.replace("_metadata.json", "_data.json")
+                with open(data_path, "w", encoding="utf-8") as f:
+                    json.dump(
+                        df.to_dict(orient="records"), f, indent=2, ensure_ascii=False
+                    )
+
+                return df, gr.update(visible=True)
+            except Exception as e:
+                logger.error(f"Error reading metadata: {str(e)}")
+                # Fall back to reading the data file if it exists
+                pass
+
+        # If we get here, we're either using an existing data file or had an error with metadata
+        try:
+            with open(file_path, "r") as f:
+                data = json.load(f)
+
+            # If variables specified, filter the data
+            if variable_text:
+                variable_list = [v.strip().upper() for v in variable_text.split(",")]
+                logger.info(f"Filter existing data with: {variable_list}")
+                filtered_data = []
+                for doc in data:
+                    filtered_doc = {}
+                    for var in variable_list:
+                        # Add the variable to filtered_doc even if it's not in the original
+                        filtered_doc[var] = doc.get(var)
+                    filtered_data.append(filtered_doc)
+                data = filtered_data
+
+            df = pd.DataFrame(data)
+            return df, gr.update(visible=True)
+
+        except Exception as e:
+            logger.error(f"Error reading data file: {str(e)}")
+            return pd.DataFrame(
+                {"Error": [f"Error reading data: {str(e)}"]}
+            ), gr.update(visible=False)
+
     except Exception as e:
         logger.error(f"Error processing PDF query: {str(e)}")
         return pd.DataFrame({"Error": [str(e)]}), gr.update(visible=False)
@@ -561,7 +665,7 @@ def create_gr_interface() -> gr.Blocks:
                         gr.Markdown("### PDF Query Variables")
                         pdf_variables = gr.Textbox(
                             show_label=False,
-                            placeholder="Type your variables separated by commas (e.g., Title, Author, Date)",
+                            placeholder="Type your variables separated by commas (e.g., STUDYID, AUTHOR, YEAR, TITLE)",
                             scale=8,
                             lines=1,
                             autofocus=True,
@@ -577,11 +681,6 @@ def create_gr_interface() -> gr.Blocks:
                         )
                     # Right column: PDF upload and processing
                     with gr.Column(scale=3):
-                        upload_variables = gr.Textbox(
-                            label="Initial Variables",
-                            placeholder="Optional: Variables to extract during upload",
-                            lines=1,
-                        )
                         with gr.Row():
                             pdf_files = gr.File(
                                 file_count="multiple",
@@ -592,6 +691,12 @@ def create_gr_interface() -> gr.Blocks:
                             collection_name = gr.Textbox(
                                 label="Collection Name",
                                 placeholder="Name this PDF collection...",
+                            )
+                        with gr.Row():
+                            upload_variables = gr.Textbox(
+                                label="Initial Variables (Optional)",
+                                placeholder="Optional: Variables to extract during upload (e.g., STUDYID, AUTHOR, YEAR)",
+                                lines=1,
                             )
                         with gr.Row():
                             upload_btn = gr.Button("Process PDFs", variant="primary")
