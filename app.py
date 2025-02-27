@@ -2,13 +2,13 @@
 
 import csv
 import datetime
-
 # from datetime import datetime
 import io
 import json
 import logging
 import os
 import shutil
+import time
 from typing import Any, List, Tuple, Union
 
 import gradio as gr
@@ -201,6 +201,9 @@ def chat_function(
     zotero_library_type = "user"
     zotero_library_id = get_cache_value("zotero_library_id")
     zotero_api_access_key = get_cache_value("zotero_api_access_key")
+    logger.info(
+        f"zotero_library_id: {zotero_library_id}  zotero_api_access_key: {zotero_api_access_key}"
+    )
     zotero_manager = ZoteroManager(
         zotero_library_id, zotero_library_type, zotero_api_access_key
     )
@@ -208,6 +211,7 @@ def chat_function(
     if not message.strip():
         return "Please enter a valid query."
 
+    start_time = time.time()
     zotero_collection = get_zotero_collection_item_by_name(zotero_manager, study_name)
     collection_items = get_zotero_collection_items(
         zotero_manager, zotero_collection.key
@@ -229,6 +233,16 @@ def chat_function(
         df = pd.DataFrame(
             {"Attachments": ["Documents have no pdf attachements to process"]}
         )
+
+    end_time = time.time()
+
+    elapsed_time = end_time - start_time
+    minutes = int(elapsed_time // 60)
+    seconds = int(elapsed_time % 60)
+
+    logger.info(
+        f"Elapsed time to download and process {study_name} {len(attachments)} documents: {minutes} minutes and {seconds} seconds"
+    )
 
     return df
 
@@ -483,6 +497,7 @@ def process_pdf_query(variable_text: str, collection_id: str) -> tuple:
                 metadata_path = file_path.replace("_data.json", "_metadata.json")
 
             try:
+                start_time = time.time()
                 with open(metadata_path, "r") as f:
                     metadata = json.load(f)
                 file_paths = metadata.get("file_paths", [])
@@ -524,6 +539,16 @@ def process_pdf_query(variable_text: str, collection_id: str) -> tuple:
                     json.dump(
                         df.to_dict(orient="records"), f, indent=2, ensure_ascii=False
                     )
+
+                end_time = time.time()
+
+                elapsed_time = end_time - start_time
+                minutes = int(elapsed_time // 60)
+                seconds = int(elapsed_time % 60)
+
+                logger.info(
+                    f"Elapsed time to process {study.name} {len(file_paths)} pdf documents: {minutes} minutes and {seconds} seconds"
+                )
 
                 return df, gr.update(visible=True)
             except Exception as e:

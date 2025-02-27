@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+import time
 import traceback
 from typing import List, Optional
 
@@ -181,6 +182,7 @@ def process_multiple_pdfs(
     combined_data = []
 
     for file_path in file_paths:
+        start_time = time.time()
         # Load the PDF document
         pdf_data = load_document(file_path)
         if not pdf_data:
@@ -208,6 +210,17 @@ def process_multiple_pdfs(
 
             # Append the DataFrame to the combined data
             combined_data.append(df)
+
+        end_time = time.time()
+
+        elapsed_time = end_time - start_time
+        minutes = int(elapsed_time // 60)
+        seconds = int(elapsed_time % 60)
+
+        file_name = os.path.basename(file_path)
+        logger.info(
+            f"Elapsed time to process {file_name} document: {minutes} minutes and {seconds} seconds"
+        )
 
     # Combine all DataFrames into a single DataFrame
     combined_df = pd.concat(combined_data, ignore_index=True)
