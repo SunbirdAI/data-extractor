@@ -15,6 +15,102 @@ Check out the configuration reference at https://huggingface.co/docs/hub/spaces-
 
 # ACRES RAG Project
 
+## Architecture
+
+The ACRES RAG system follows a modular architecture designed for efficient document processing and information extraction:
+
+```mermaid
+%%{init: {'theme': 'default', 'themeVariables': { 'fontSize': '16px' }, 'flowchart': { 'htmlLabels': true, 'curve': 'basis', 'width': '100%', 'height': '100%' }}}%%
+graph LR
+    %% User Interaction Layer
+    User((User)) --> WebUI[Web UI\nGradio Interface]
+    User --> API[FastAPI\nREST API]
+    
+    subgraph "Input Stage"
+        WebUI
+        API
+        subgraph "Input Sources"
+            ZoteroLib[Zotero Library]
+            PDFUpload[PDF Upload]
+        end
+        WebUI --> ZoteroLib
+        WebUI --> PDFUpload
+        API --> ZoteroLib
+        API --> PDFUpload
+    end
+
+    subgraph "Processing Core"
+        subgraph "Document Ingestion"
+            ZoteroManager[Zotero Manager\nCollection & Items]
+            PDFProcessor[PDF Processor\nFile Management]
+            ZoteroLib --> ZoteroManager
+            PDFUpload --> PDFProcessor
+        end
+
+        subgraph "Document Processing"
+            TextExtraction[Text Extraction\n& Preprocessing]
+            ChromaDB[(ChromaDB\nVector Store)]
+            ZoteroManager --> TextExtraction
+            PDFProcessor --> TextExtraction
+            TextExtraction --> ChromaDB
+        end
+
+        subgraph "RAG Pipeline"
+            QueryProcessing[Query Processing]
+            Retrieval[Document Retrieval]
+            LLMInference[LLM Inference\nOpenAI]
+            
+            ChromaDB --> Retrieval
+            QueryProcessing --> Retrieval
+            Retrieval --> LLMInference
+        end
+
+        subgraph "Variable Extraction"
+            VariableParser[Variable Parser]
+            DataFrameGen[DataFrame Generation]
+            LLMInference --> VariableParser
+            VariableParser --> DataFrameGen
+        end
+    end
+
+    subgraph "Output Stage"
+        CSVExport[CSV Export]
+        DataFrameView[DataFrame View]
+        DataFrameGen --> CSVExport
+        DataFrameGen --> DataFrameView
+    end
+
+    CSVExport --> ACRESTeam[ACRES Team]
+    DataFrameView --> ACRESTeam[ACRES Team]
+
+    %% Styling
+    classDef primary fill:#f9f,stroke:#333,stroke-width:4px
+    classDef secondary fill:#bbf,stroke:#333,stroke-width:3px
+    classDef storage fill:#dfd,stroke:#333,stroke-width:3px
+    
+    class WebUI,API primary
+    class ZoteroManager,PDFProcessor,TextExtraction,QueryProcessing,Retrieval,LLMInference,VariableParser,DataFrameGen secondary
+    class ChromaDB storage
+```
+
+### Architecture Components
+
+1. **Input Stage**
+   - Web UI: Gradio-based interface for user interactions
+   - REST API: FastAPI endpoints for programmatic access
+   - Input Sources: Supports both Zotero library integration and direct PDF uploads
+
+2. **Processing Core**
+   - Document Ingestion: Handles document collection from various sources
+   - Document Processing: Extracts and preprocesses text from documents
+   - RAG Pipeline: Implements retrieval-augmented generation for accurate information extraction
+   - Variable Extraction: Parses and structures extracted information
+
+3. **Output Stage**
+   - Provides structured data in CSV format
+   - Offers interactive DataFrame views
+   - Delivers processed data to ACRES team for analysis
+
 ## Project Setup
 
 To test and run the project locally. Clone the project from github and change directoory to `acres`.
