@@ -68,7 +68,7 @@ def extract_variables(text: str, variables: str, model="gpt-4o-mini"):
     Args:
         text (str): The input text from which variables should be extracted.
         variables (str): A comma-separated string of variable names to extract.
-        model (str): The OpenAI model to use (default is gpt-4).
+        model (str): The OpenAI model to use (default is gpt-4o-mini).
 
     Returns:
         str: A JSON string containing only the extracted variables.
