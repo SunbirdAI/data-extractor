@@ -6,12 +6,16 @@ import os
 import shutil
 import time
 
+import gradio as gr
 import pandas as pd
 from slugify import slugify
-import gradio as gr
 
 from config import DATA_DIR, UPLOAD_DIR, logger
-from utils.db import add_study_files_to_db, get_study_files_by_library_id, get_study_file_by_name
+from utils.db import (
+    add_study_files_to_db,
+    get_study_file_by_name,
+    get_study_files_by_library_id,
+)
 from utils.helpers import add_study_files_to_chromadb, append_to_study_files
 from utils.pdf_processor import PDFProcessor
 from utils.zotero_pdf_processory import (
@@ -116,7 +120,7 @@ def process_pdf_query(variable_text: str, collection_id: str):
             pd.DataFrame(
                 {"Error": ["No PDF collection uploaded. Please upload PDFs first."]}
             ),
-            gr.update(visible=False)
+            gr.update(visible=False),
         )
 
     # Find the study file by collection_id
@@ -126,7 +130,7 @@ def process_pdf_query(variable_text: str, collection_id: str):
         return pd.DataFrame(
             {"Error": [f"Study for Collection '{collection_id}' not found."]}
         ), gr.update(visible=False)
-    
+
     study_file_path = None
     # Try to find the data or metadata file
     for ext in ["_data.json", "_metadata.json"]:
@@ -138,7 +142,7 @@ def process_pdf_query(variable_text: str, collection_id: str):
     if not study_file_path:
         return (
             pd.DataFrame({"Error": [f"Collection '{collection_id}' not found."]}),
-            gr.update(visible=False)
+            gr.update(visible=False),
         )
 
     try:
@@ -150,7 +154,9 @@ def process_pdf_query(variable_text: str, collection_id: str):
 
         file_paths = metadata.get("file_paths", [])
         if not file_paths:
-            return pd.DataFrame({"Error": ["Original PDF files not found"]}), gr.update(visible=False)
+            return pd.DataFrame({"Error": ["Original PDF files not found"]}), gr.update(
+                visible=False
+            )
 
         # Use provided variables or initial variables if none provided
         vars_to_use = (
@@ -159,7 +165,7 @@ def process_pdf_query(variable_text: str, collection_id: str):
         if not vars_to_use:
             return (
                 pd.DataFrame({"Error": ["Please specify variables to extract"]}),
-                gr.update(visible=False)
+                gr.update(visible=False),
             )
 
         # Reprocess the PDFs with the new variables
@@ -180,7 +186,7 @@ def process_pdf_query(variable_text: str, collection_id: str):
         data_path = study_file_path.replace("_metadata.json", "_data.json")
         with open(data_path, "w", encoding="utf-8") as f:
             json.dump(df.to_dict(orient="records"), f, indent=2, ensure_ascii=False)
-        
+
         end_time = time.time()
 
         elapsed_time = end_time - start_time
@@ -304,22 +310,28 @@ def cleanup_temp_files():
 
 def new_study_choices(zotero_library_id=None):
     """
-    Refresh and return the list of available study choices.
+    Refresh and return the list of available study choices as a Markdown string, a list, and a value.
     """
     logger.info("Refreshing study choices")
+    logger.info(f"Zotero ID: {zotero_library_id}")
     try:
-        # If you have a zotero_library_id in session/cache, use it
         if zotero_library_id:
             study_files = get_study_files_by_library_id([zotero_library_id])
         else:
-            # Fallback: get all study files
             study_files = get_study_files_by_library_id([])
 
         study_choices = [file.name for file in study_files]
-        return study_choices
+        # Markdown string
+        if study_choices:
+            md = f"**Your studies are:**<br>{'<br>'.join(study_choices)}"
+            value = study_choices[0]
+        else:
+            md = "No studies found."
+            value = None
+        return md, gr.update(choices=study_choices, value=value)
     except Exception as e:
         logger.error(f"Error refreshing study choices: {e}")
-        return []
+        return "Error refreshing study choices.", gr.update(choices=[], value=None)
 
 
 def markdown_table_to_csv(markdown_text: str) -> str:

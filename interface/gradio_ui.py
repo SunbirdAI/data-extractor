@@ -163,11 +163,12 @@ def create_gr_interface() -> gr.Blocks:
 
         # ----- Event Handlers for the Study Analysis Tab -----
         process_zotero_btn.click(
-            lambda lib_id, api_key: process_zotero_library_items(
-                lib_id, api_key, cache
+            lambda lib_id, api_key: (
+                process_zotero_library_items(lib_id, api_key, cache),
+                *new_study_choices(lib_id),
             ),
             inputs=[zotero_library_id_param, zotero_api_access_key],
-            outputs=[zotero_output],
+            outputs=[zotero_output, new_studies, study_dropdown],
         )
 
         study_dropdown.change(
@@ -185,8 +186,11 @@ def create_gr_interface() -> gr.Blocks:
         ).then(cleanup_temp_files, inputs=None, outputs=None)
 
         refresh_button.click(
-            lambda: new_study_choices(),  # You can pass zotero_library_id if needed
-            outputs=[new_studies],
+            lambda zotero_id: new_study_choices(
+                zotero_id if zotero_id else zotero_library_id
+            ),
+            inputs=[zotero_library_id_param],
+            outputs=[new_studies, study_dropdown],
         )
 
     return demo
