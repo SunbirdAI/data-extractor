@@ -5,16 +5,34 @@ import shutil
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
+from uuid import uuid4
 
 import pandas as pd
+from cachetools import LRUCache
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import (
+    APIRouter,
+    Cookie,
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from gradio_client import Client
 from pydantic import BaseModel, ConfigDict, constr
 
 from docs import description, tags_metadata
+from services.file_service import cleanup_temp_files, download_as_csv
+from services.file_service import new_study_choices as get_study_choices_service
+from services.rag_service import process_multi_input
+from services.zotero_service import get_study_info as get_study_info_service
+from services.zotero_service import process_zotero_library_items
 from utils.zotero_pdf_processory import (
     export_dataframe_to_csv,
     process_multiple_pdfs,
@@ -26,9 +44,9 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-GRADIO_URL = os.getenv("GRADIO_URL", "http://localhost:7860/")
-logger.info(f"GRADIO_URL: {GRADIO_URL}")
-client = Client(GRADIO_URL)
+# GRADIO_URL = os.getenv("GRADIO_URL", "http://localhost:7860/")
+# logger.info(f"GRADIO_URL: {GRADIO_URL}")
+# client = Client(GRADIO_URL)
 
 UPLOAD_DIR = "zotero_data/uploads"
 
@@ -50,6 +68,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+router = APIRouter()
+
+# Simple in-memory cache for demonstration
+session_cache = {}
+
+cache = LRUCache(maxsize=100)
 
 
 class StudyVariables(str, Enum):
@@ -167,86 +192,120 @@ def json_to_dataframe(json_data):
     return dataframe
 
 
-@app.post("/process_zotero_library_items", tags=["zotero"])
-def process_zotero_library_items(zotero_credentials: ZoteroCredentials):
-    """Process items from a Zotero library using provided credentials.
+class ZoteroLibraryRequest(BaseModel):
+    zotero_library_id: str
+    zotero_api_access_key: str
 
-    This endpoint integrates with Zotero to fetch and process library items. It uses the provided
-    credentials to authenticate and access the specified Zotero library.
+
+def get_session_data(session_token: Optional[str] = Cookie(default=None)):
+    """
+    Dependency to retrieve session data from the session cache.
+    Raises HTTPException if session is missing or invalid.
+    """
+    if not session_token or session_token not in session_cache:
+        raise HTTPException(
+            status_code=401, detail="Session not found. Please authenticate."
+        )
+    return session_cache[session_token]
+
+
+@router.post("/process_zotero_library_items", tags=["zotero"])
+def process_zotero_library_items_endpoint(
+    request: ZoteroLibraryRequest,
+    response: Response,
+    session_token: Optional[str] = Cookie(default=None),
+):
+    """
+    Process the user's Zotero library and update study files and ChromaDB.
+
+    This endpoint accepts Zotero credentials, processes the user's Zotero library,
+    and stores the credentials in a session cookie for subsequent requests.
 
     Parameters
     ----------
-    zotero_credentials : ZoteroCredentials
+    request : ZoteroLibraryRequest
         Request body containing:
-        - library_id (str): Zotero library identifier
-        - api_access_key (str): Zotero API access key
-        Both fields must be non-empty strings.
+        - zotero_library_id (str): The user's Zotero library ID
+        - zotero_api_access_key (str): The user's Zotero API access key
 
     Returns
     -------
     dict
-        A dictionary containing the 'result' key with processed data from the Zotero library.
-        The exact structure depends on the external client.predict() response.
+        A dictionary with:
+        - message: Status message (success or error)
+        - session_token: The session token to be used in subsequent requests (also set as a cookie)
 
     Raises
     ------
     HTTPException
-        400 Bad Request - If required fields are missing or invalid
-        500 Internal Server Error - If there is an issue calling client.predict or Zotero service fails
+        500 Internal Server Error - If processing fails
 
     Example
     -------
     Request body:
         {
-            "library_id": "1234567",
-            "api_access_key": "ZoteroApiKeyXYZ"
+            "zotero_library_id": "1234567",
+            "zotero_api_access_key": "abcd1234efgh5678"
         }
 
     Response:
         {
-            "result": {
-                "someProcessedData": "..."
-            }
+            "message": "Successfully processed items in your zotero library",
+            "session_token": "b1c2d3e4-5678-1234-9abc-abcdef123456"
         }
 
     Notes
     -----
-    - Relies on external client.predict() to process Zotero library data
-    - No file downloads or uploads in this endpoint
-    - Ensure library_id and api_access_key are valid in the Zotero system
+    - The session_token is also set as a cookie for session management.
+    - Use the session_token cookie in subsequent requests to access session-specific data.
     """
-    result = client.predict(
-        zotero_library_id_param=zotero_credentials.library_id,
-        zotero_api_access_key=zotero_credentials.api_access_key,
-        api_name="/process_zotero_library_items",
-    )
-    return {"result": result}
+    try:
+        # Use existing session token or create a new one
+        if not session_token:
+            session_token = str(uuid4())
+            response.set_cookie(key="session_token", value=session_token, httponly=True)
+
+        # Store credentials in the session cache
+        session_cache[session_token] = {
+            "zotero_library_id": request.zotero_library_id,
+            "zotero_api_access_key": request.zotero_api_access_key,
+        }
+
+        # Call your service function directly
+        message = process_zotero_library_items(
+            request.zotero_library_id,
+            request.zotero_api_access_key,
+            cache=cache,  # You can pass session_cache[session_token] if your service supports it
+        )
+        return {"message": message, "session_token": session_token}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/get_study_info", tags=["zotero"])
-def get_study_info(study: Study):
-    """Retrieve detailed information about a specific study.
+@router.post("/get_study_info", tags=["zotero"])
+def get_study_info(study: Study, session_data: dict = Depends(get_session_data)):
+    """
+    Retrieve detailed information about a specific study for the current session's Zotero library.
 
-    This endpoint integrates with a remote service to get study details based on the provided study name.
+    This endpoint returns summary information about a study, such as the number of documents.
 
     Parameters
     ----------
     study : Study
         Request body containing:
         - study_name (str): The name of the study to fetch info for
-        Must be a non-empty string.
 
     Returns
     -------
     dict
-        A dictionary containing the 'result' key with study details.
-        The exact structure depends on the external client.predict() response.
+        A dictionary with:
+        - result: A string summary of the study (e.g., number of documents)
 
     Raises
     ------
     HTTPException
-        400 Bad Request - If study_name is missing or invalid
-        500 Internal Server Error - If there is an issue with the external client.predict call
+        401 Unauthorized - If session or Zotero library ID is missing
+        500 Internal Server Error - If there is an error fetching study info
 
     Example
     -------
@@ -257,102 +316,152 @@ def get_study_info(study: Study):
 
     Response:
         {
-            "result": {
-                "studyDetails": "some details here"
-                // additional data from external service
-            }
+            "result": "### Number of documents: 42"
         }
 
     Notes
     -----
-    - Expects a valid study name that exists in the external system
-    - Return data structure is dependent on client.predict response
+    - Requires a valid session (session_token cookie).
+    - The study_name must exist in the user's Zotero library.
     """
-    result = client.predict(study_name=study.study_name, api_name="/get_study_info")
-    return {"result": result}
+    # Check for session and zotero_library_id
+    if (
+        not session_data
+        or "zotero_library_id" not in session_data
+        or not session_data["zotero_library_id"]
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail="No Zotero session or library ID found. Please authenticate and process your Zotero library first.",
+        )
+
+    zotero_id = session_data["zotero_library_id"]
+    study_name = study.study_name
+
+    try:
+        # Call your own service logic
+        result = get_study_info_service(study_name)
+        return {"result": result}
+    except Exception as e:
+        logger.error(f"Error in get_study_info: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get study info: {e}")
 
 
-@app.post("/study_variables", tags=["zotero"])
-def process_study_variables(study_request: StudyVariableRequest):
-    """Process text and return study variable data based on specified parameters.
+@router.post("/study_variables", tags=["zotero"])
+def process_study_variables(
+    study_request: StudyVariableRequest, session_data: dict = Depends(get_session_data)
+):
+    """
+    Process text and return study variable data based on specified parameters.
 
-    This endpoint uses an external service to interpret a textual prompt with a specified
-    study variable and prompt type.
+    This endpoint extracts variables from studies using the specified prompt type and returns the results as a table.
 
     Parameters
     ----------
     study_request : StudyVariableRequest
         Request body containing:
-        - study_variable (StudyVariables | str): Either one of the enumerated values
-          ('Ebola Virus', 'Vaccine coverage', 'GeneXpert') or a custom string
-        - prompt_type (PromptType): One of 'Default', 'Highlight', or 'Evidence-based'
-        - text (str): The text to process (must be non-empty) i.e "STUDYID, AUTHOR, YEAR, TITLE,
-        PUBLICATION_TYPE, STUDY_DESIGN, STUDY_AREA_REGION, STUDY_POPULATION"
+        - study_variable (str): The study name to process
+        - prompt_type (str): The prompt type ("Default", "Highlight", "Evidence-based")
+        - text (str): Comma-separated list of variables to extract (e.g., "STUDYID, AUTHOR, YEAR, TITLE")
 
     Returns
     -------
     dict
-        A dictionary containing the 'result' key with the first item of processed data.
-        The exact structure depends on the external client.predict() response.
+        A dictionary with:
+        - result: An object containing headers (list of column names) and data (2D array of values)
 
     Raises
     ------
     HTTPException
-        400 Bad Request - If required fields are missing or invalid
-        500 Internal Server Error - If there is an issue with the external service
+        401 Unauthorized - If session or Zotero library ID is missing
+        500 Internal Server Error - If processing fails
 
     Example
     -------
     Request body:
         {
-            "study_variable": "Ebola Virus",
+            "study_variable": "Global Ebola Research",
             "prompt_type": "Default",
-            "text": "Summarize the latest Ebola Virus research."
+            "text": "STUDYID, AUTHOR, YEAR, TITLE"
         }
 
     Response:
         {
-            "result": "processed result from external service"
+            "result": {
+                "headers": ["STUDYID", "AUTHOR", "YEAR", "TITLE"],
+                "data": [
+                    ["123", "Smith", "2020", "Ebola Study"],
+                    ["124", "Jones", "2021", "Vaccine Coverage"]
+                ]
+            }
         }
 
     Notes
     -----
-    - The study_variable field accepts both enumerated values and custom strings
-    - prompt_type must be one of the predefined PromptType enum values
-    - Returns only the first item from the result array (result[0])
+    - Requires a valid session (session_token cookie).
+    - The study_variable must exist in the user's Zotero library.
     """
-    result = client.predict(
-        text=study_request.text,
-        study_name=study_request.study_variable,
-        prompt_type=study_request.prompt_type,
-        api_name="/process_multi_input",
-    )
+    # Check for session and zotero_library_id
+    if (
+        not session_data
+        or "zotero_library_id" not in session_data
+        or not session_data["zotero_library_id"]
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail="No Zotero session or library ID found. Please authenticate and process your Zotero library first.",
+        )
 
-    return {"result": result[0]}
+    # Extract variables from request
+    study_variable = study_request.study_variable
+    prompt_type = study_request.prompt_type
+    text = study_request.text
+
+    try:
+        # Call your own service logic
+        result_df, _ = process_multi_input(text, study_variable, prompt_type, cache)
+
+        # Replace problematic values
+        result_df = result_df.replace([float("inf"), float("-inf")], None)
+        result_df = result_df.where(
+            pd.notnull(result_df), None
+        )  # replaces NaN with None
+
+        # Convert DataFrame to dict for JSON response
+        result = {
+            "headers": result_df.columns.tolist(),
+            "data": result_df.values.tolist(),
+        }
+        return {"result": result}
+    except Exception as e:
+        logger.error(f"Error in process_study_variables: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to process study variables: {e}"
+        )
 
 
-@app.post("/new_study_choices", tags=["zotero"])
-def new_study_choices():
-    """Fetch a list of new study choices or suggestions.
+@router.post("/new_study_choices", tags=["zotero"])
+def new_study_choices_endpoint(session_data: dict = Depends(get_session_data)):
+    """
+    Fetch a list of available study choices for the current session's Zotero library.
 
-    This endpoint retrieves a list of recommended or newly added study options from
-    the external service. It does not require any input parameters.
+    This endpoint returns a list of study names that the user can select from.
 
     Parameters
     ----------
     None
-        This endpoint does not accept any parameters.
+        Uses the session_token cookie to identify the user.
 
     Returns
     -------
     dict
-        A dictionary containing the 'result' key with an array of study choices.
-        The exact structure depends on the external client.predict() response.
+        A dictionary with:
+        - result: A list of study names (strings)
 
     Raises
     ------
     HTTPException
-        500 Internal Server Error - If there is an issue with the external client.predict call
+        401 Unauthorized - If session or Zotero library ID is missing
 
     Example
     -------
@@ -362,87 +471,106 @@ def new_study_choices():
     Response:
         {
             "result": [
-                // array of study choices from external service
+                "Global Ebola Research",
+                "COVID-19 Vaccine Studies",
+                "Malaria Interventions"
             ]
         }
 
     Notes
     -----
-    - Simple endpoint that delegates directly to client.predict
-    - The external service logic determines the actual returned data structure
+    - Requires a valid session (session_token cookie).
+    - The returned list can be used to populate dropdowns or selection lists in the frontend.
     """
-    result = client.predict(api_name="/new_study_choices")
+    # Check for session and zotero_library_id
+    if (
+        not session_data
+        or "zotero_library_id" not in session_data
+        or not session_data["zotero_library_id"]
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail="No Zotero session or library ID found. Please authenticate and process your Zotero library first.",
+        )
+
+    zotero_id = session_data["zotero_library_id"]
+    result = get_study_choices_service(zotero_id)
     return {"result": result}
 
 
 @app.post("/download_csv", tags=["zotero"])
 def download_csv(payload: DownloadCSV):
-    """Generate and download a CSV file from provided data.
+    """
+    Generate a CSV file from provided data and return the file path.
 
-    This endpoint takes headers and data in a DataFrame-like structure and returns
-    a downloadable CSV file. After generating the file, it triggers cleanup of temporary files.
+    This endpoint takes tabular data (headers and rows), saves it as a CSV file on the server,
+    and returns the file path. The client can then use this path to download the file via a separate endpoint.
 
     Parameters
     ----------
     payload : DownloadCSV
         Request body containing:
-        - headers (List[str]): Column names for the CSV
-        - data (List[List[Any]]): 2D array of data, each inner list is a row
+        - headers (List[str]): List of column names
+        - data (List[List[Any]]): 2D array of data rows
         - metadata (Optional[Any]): Optional metadata about the data
 
     Returns
     -------
-    FileResponse
-        A downloadable CSV file with the following properties:
-        - media_type: "text/csv"
-        - filename: Generated from the server's file path
+    dict
+        A dictionary with:
+        - file_path: The path to the generated CSV file on the server
 
     Raises
     ------
     HTTPException
-        404 Not Found - If the generated CSV file path is invalid or file not found
-        400 Bad Request - If headers or data are malformed
-        500 Internal Server Error - If saving, retrieving, or cleanup fails
+        404 Not Found - If the file could not be created
+        500 Internal Server Error - If there is an error during file creation
 
     Example
     -------
     Request body:
         {
-            "headers": ["Column1", "Column2", "Column3"],
+            "headers": ["STUDYID", "AUTHOR", "YEAR", "TITLE"],
             "data": [
-                ["Value1", "Value2", "Value3"],
-                ["Value4", "Value5", "Value6"]
+                ["123", "Smith", "2020", "Ebola Study"],
+                ["124", "Jones", "2021", "Vaccine Coverage"]
             ],
-            "metadata": {
-                "description": "Sample data"
-            }
+            "metadata": null
         }
 
     Response:
-        A downloadable CSV file containing the data
+        {
+            "file_path": "zotero_data/study_export_20250503_220616.csv"
+        }
 
     Notes
     -----
-    - Converts input data to CSV using client.predict
-    - Automatically cleans up temporary files after download
-    - Headers length should match the number of columns in each data row
+    - The client should use the returned file_path to download the file via a separate endpoint.
+    - The file will be deleted after download or after a certain period for cleanup.
     """
-    json_data = payload.model_dump()
-    result = client.predict(df=json_data, api_name="/download_as_csv")
-    logger.info(result)
+    try:
+        # Convert payload to DataFrame
+        df = pd.DataFrame(payload.data, columns=payload.headers)
+        # Replace problematic values for CSV export
+        df = df.replace([float("inf"), float("-inf")], None)
+        df = df.where(pd.notnull(df), None)
 
-    file_path = result
-    if not file_path or not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="File not found")
+        # Use your own service to export DataFrame to CSV
+        file_path = download_as_csv(df)
+        if not file_path or not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="File not found")
 
-    clean_up = client.predict(api_name="/cleanup_temp_files")
-    logger.info(clean_up)
+        # Clean up temp files after download
+        # cleanup_temp_files()
 
-    return FileResponse(
-        file_path,
-        media_type="text/csv",
-        filename=os.path.basename(file_path),
-    )
+        return FileResponse(
+            file_path,
+            media_type="text/csv",
+            filename=os.path.basename(file_path),
+        )
+    except Exception as e:
+        logger.error(f"Error in download_csv: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate CSV: {e}")
 
 
 def save_upload_file(upload_file: UploadFile) -> str:
@@ -563,6 +691,9 @@ def handle_pdf_uploads(
 
     response = format_dataframe(df, include_metadata=True)
 
-    client.predict(api_name="/cleanup_temp_files")
+    cleanup_temp_files()
 
     return {"data": response}
+
+
+app.include_router(router)
