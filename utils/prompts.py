@@ -2,7 +2,6 @@
 
 from typing import List, Optional
 
-from llama_index.core import PromptTemplate
 from llama_index.core.prompts import PromptTemplate
 from pydantic import BaseModel, Field
 
