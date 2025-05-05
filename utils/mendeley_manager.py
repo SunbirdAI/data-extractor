@@ -1,312 +1,340 @@
 import json
 import os
-import time
-from urllib.parse import urlencode
 
 import requests
 from dotenv import load_dotenv
+from requests.auth import HTTPBasicAuth
+from slugify import slugify
 
+# Load environment variables from .env file
 load_dotenv()
 
 
-class MendeleyAPIError(Exception):
-    """Custom exception class to handle Mendeley API errors."""
+class MendeleyManager:
+    def __init__(self, client_id=None, client_secret=None, redirect_uri=None):
+        self.client_id = client_id or os.getenv("MENDELEY_CLIENT_ID")
+        self.client_secret = client_secret or os.getenv("MENDELEY_SECRET_KEY")
+        self.redirect_uri = redirect_uri or os.getenv("MENDELEY_REDIRECT_URI")
+        self.base_url = "https://api.mendeley.com"
 
-    pass
-
-
-class MendeleyClient:
-    """
-    A simple Python client for interacting with the Mendeley API.
-
-    This class handles the OAuth2 flow (getting tokens, refreshing them)
-    and provides methods for fetching folders, documents, and files.
-    """
-
-    def __init__(self, client_id, client_secret, redirect_uri):
-        """
-        :param client_id: Your Mendeley app's client ID
-        :param client_secret: Your Mendeley app's client secret
-        :param redirect_uri: The redirect URI registered with Mendeley
-        """
-        self.client_id = client_id
-        self.client_secret = client_secret
-        self.redirect_uri = redirect_uri
-
-        # Mendeley endpoints
-        self.auth_url = "https://api.mendeley.com/oauth/token"
-        self.base_api_url = "https://api.mendeley.com"
-
-        # Tokens and timing
-        self.access_token = None
-        self.refresh_token = None
-        self.expires_in = None
-        self.token_acquired_timestamp = None
-
-    def get_authorization_url(self, scope="all", state="dummy_state"):
-        """
-        Generates the authorization URL to which the user should be redirected
-        in order to grant access to this application.
-
-        :param scope: The scope of permissions requested.
-        :param state: A random string for security (CSRF protection).
-        :return: A URL string for the Mendeley authorization page.
-        """
-        params = {
-            "client_id": self.client_id,
-            "redirect_uri": self.redirect_uri,
-            "response_type": "code",
-            "scope": scope,
-            "state": state,
-        }
-        url = f"https://api.mendeley.com/oauth/authorize?{urlencode(params)}"
-        return url
-
-    def exchange_code_for_token(self, code):
-        """
-        Exchange the authorization code for an access token and refresh token.
-
-        :param code: The authorization code obtained from the callback
-        """
-        data = {
-            "grant_type": "authorization_code",
-            "code": code,
-            "redirect_uri": self.redirect_uri,
-            "client_id": self.client_id,
-            "client_secret": self.client_secret,
-        }
-
-        try:
-            response = requests.post(self.auth_url, data=data)
-            response.raise_for_status()  # Raise HTTPError if 4xx or 5xx
-        except requests.RequestException as e:
-            raise MendeleyAPIError(f"Error exchanging code for token: {str(e)}")
-
-        token_data = response.json()
-        self._store_token_data(token_data)
-
-    def refresh_access_token(self):
-        """
-        Refresh the access token using the refresh token.
-        """
-        if not self.refresh_token:
-            raise MendeleyAPIError(
-                "No refresh token available to refresh the access token."
+        if not self.client_id or not self.client_secret or not self.redirect_uri:
+            raise RuntimeError(
+                "Missing MENDELEY_CLIENT_ID, MENDELEY_SECRET_KEY, or MENDELEY_REDIRECT_URI in environment variables"
             )
 
-        data = {
-            "grant_type": "refresh_token",
-            "refresh_token": self.refresh_token,
-            "client_id": self.client_id,
-            "client_secret": self.client_secret,
-        }
+    def get_auth_url(self):
+        """Generate the authorization URL."""
+        scope = (
+            "all"  # Replace "all" with the specific scopes you need # all, read, write
+        )
+        auth_url = f"{self.base_url}/oauth/authorize?client_id={self.client_id}&redirect_uri={self.redirect_uri}&response_type=code&scope={scope}"
+        return auth_url
 
+    def get_access_token(self, auth_code):
+        """Exchange authorization code for an access token."""
         try:
-            response = requests.post(self.auth_url, data=data)
-            response.raise_for_status()
-        except requests.RequestException as e:
-            raise MendeleyAPIError(f"Error refreshing access token: {str(e)}")
-
-        token_data = response.json()
-        self._store_token_data(token_data)
-
-    def _store_token_data(self, token_data):
-        """
-        Store token data from Mendeley’s OAuth server.
-        """
-        self.access_token = token_data.get("access_token")
-        self.refresh_token = token_data.get("refresh_token")
-        self.expires_in = token_data.get("expires_in")
-        # Record when we obtained the token to know when it expires
-        self.token_acquired_timestamp = time.time()
-
-    def _is_token_expired(self):
-        """
-        Checks if the access token is close to expiration (or expired).
-        Returns True if the token is invalid or about to expire.
-        """
-        if (
-            not self.access_token
-            or not self.expires_in
-            or not self.token_acquired_timestamp
-        ):
-            return True  # No token is effectively expired
-
-        # Give a 60-second buffer
-        if time.time() >= (self.token_acquired_timestamp + self.expires_in - 60):
-            return True
-
-        return False
-
-    def _ensure_token_valid(self):
-        """
-        Ensures we have a valid token; refreshes it if necessary.
-        """
-        if self._is_token_expired():
-            self.refresh_access_token()
-
-    def _get_headers(self):
-        if not self.access_token:
-            raise MendeleyAPIError(
-                "Access token is missing. Please authenticate first."
+            token_url = f"{self.base_url}/oauth/token"
+            data = {
+                "grant_type": "authorization_code",
+                "code": auth_code,
+                "redirect_uri": self.redirect_uri,
+            }
+            response = requests.post(
+                token_url,
+                data=data,
+                auth=HTTPBasicAuth(self.client_id, self.client_secret),
             )
-        return {
-            "Authorization": f"Bearer {self.access_token}",
-            "Content-Type": "application/json",
-        }
-
-    def get_folders(self, limit=20, order="asc"):
-        """
-        Get a list of personal folders (collections) from the Mendeley API.
-
-        :param limit: The number of folders to retrieve (optional).
-        :param order: Sort order "asc" or "desc" (optional).
-        :return: A list of folder objects.
-        """
-        self._ensure_token_valid()
-        url = f"{self.base_api_url}/folders"
-        params = {"limit": limit, "order": order}
-
-        try:
-            response = requests.get(url, headers=self._get_headers(), params=params)
             response.raise_for_status()
-        except requests.RequestException as e:
-            raise MendeleyAPIError(f"Error getting folders: {str(e)}")
+            return response.json().get("access_token")
+        except requests.exceptions.RequestException as e:
+            print(f"Error fetching access token: {e}")
+            return None
 
-        return response.json()
-
-    def get_folder_by_id(self, folder_id):
-        """
-        Get the details of a specific folder.
-
-        :param folder_id: The ID of the folder.
-        :return: A dictionary with folder details.
-        """
-        self._ensure_token_valid()
-        url = f"{self.base_api_url}/folders/{folder_id}"
-
+    def list_documents(self, access_token):
+        """List all documents."""
         try:
-            response = requests.get(url, headers=self._get_headers())
+            url = f"{self.base_url}/documents"
+            headers = {"Authorization": f"Bearer {access_token}"}
+            response = requests.get(url, headers=headers)
             response.raise_for_status()
-        except requests.RequestException as e:
-            raise MendeleyAPIError(f"Error getting folder by ID {folder_id}: {str(e)}")
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"Error listing documents: {e}")
+            return None
 
-        return response.json()
-
-    def get_documents_in_folder(self, folder_id, limit=20, order="asc"):
-        """
-        Get documents stored in a specific folder.
-
-        :param folder_id: The ID of the folder.
-        :param limit: The number of documents to retrieve (optional).
-        :param order: Sort order "asc" or "desc" (optional).
-        :return: A list of document objects.
-        """
-        self._ensure_token_valid()
-        url = f"{self.base_api_url}/folders/{folder_id}/documents"
-        params = {"limit": limit, "order": order}
-
+    def list_collections(self, access_token):
+        """List all collections."""
         try:
-            response = requests.get(url, headers=self._get_headers(), params=params)
+            url = f"{self.base_url}/folders"
+            headers = {"Authorization": f"Bearer {access_token}"}
+            response = requests.get(url, headers=headers)
             response.raise_for_status()
-        except requests.RequestException as e:
-            raise MendeleyAPIError(
-                f"Error getting documents in folder {folder_id}: {str(e)}"
-            )
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"Error listing collections: {e}")
+            return None
 
-        return response.json()
-
-    def get_document(self, document_id):
-        """
-        Retrieve details for a specific document.
-
-        :param document_id: The ID of the document.
-        :return: A dictionary with document details.
-        """
-        self._ensure_token_valid()
-        url = f"{self.base_api_url}/documents/{document_id}"
-
+    def check_document_exists(self, access_token, file_hash):
+        """Check if a document exists for a given file hash."""
         try:
-            response = requests.get(url, headers=self._get_headers())
+            url = f"{self.base_url}/catalog?filehash={file_hash}"
+            headers = {"Authorization": f"Bearer {access_token}"}
+            response = requests.get(url, headers=headers)
             response.raise_for_status()
-        except requests.RequestException as e:
-            raise MendeleyAPIError(f"Error getting document {document_id}: {str(e)}")
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"Error checking document existence: {e}")
+            return None
 
-        return response.json()
-
-    def get_files_for_document(self, document_id):
-        """
-        Retrieve the files attached to a specific document.
-
-        :param document_id: The ID of the document.
-        :return: A list of files (with metadata) attached to the document.
-        """
-        self._ensure_token_valid()
-        url = f"{self.base_api_url}/files"
-        params = {"document_id": document_id}
-
+    def extract_metadata(self, access_token, pdf_file_path):
+        """Extract metadata from a PDF file."""
         try:
-            response = requests.get(url, headers=self._get_headers(), params=params)
+            url = f"{self.base_url}/documents"
+            headers = {
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/pdf",
+                "Content-Disposition": f'attachment; filename="{os.path.basename(pdf_file_path)}"',
+            }
+            with open(pdf_file_path, "rb") as pdf_file:
+                response = requests.post(url, headers=headers, data=pdf_file)
+                response.raise_for_status()
+                return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"Error extracting metadata: {e}")
+            return None
+
+    def check_files_in_collection(self, access_token, collection_id):
+        """Check if documents in a collection have files attached."""
+        try:
+            url = f"{self.base_url}/documents?collection_id={collection_id}"
+            headers = {"Authorization": f"Bearer {access_token}"}
+            response = requests.get(url, headers=headers)
             response.raise_for_status()
-        except requests.RequestException as e:
-            raise MendeleyAPIError(
-                f"Error getting files for document {document_id}: {str(e)}"
-            )
+            documents = response.json()
+            return {doc["id"]: doc.get("file_attached", False) for doc in documents}
+        except requests.exceptions.RequestException as e:
+            print(f"Error checking files in collection: {e}")
+            return None
 
-        return response.json()
+    def list_documents_and_files_in_collection(self, access_token, collection_id):
+        """List documents and their attached files in a given collection."""
+        try:
+            # Fetch documents in the collection
+            url = f"{self.base_url}/documents?collection_id={collection_id}"
+            headers = {"Authorization": f"Bearer {access_token}"}
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            documents = response.json()
+
+            # Prepare a list to store documents and their files
+            collection_data = []
+
+            for document in documents:
+                document_id = document.get("id")
+                document_title = document.get("title", "Untitled")
+                print(
+                    f"Fetching files for document: {document_title} (ID: {document_id})"
+                )
+
+                # Fetch files attached to the document
+                files = self.list_files(access_token, document_id)
+                collection_data.append(
+                    {
+                        "document_id": document_id,
+                        "document_title": document_title,
+                        "files": files,
+                    }
+                )
+
+            return collection_data
+        except requests.exceptions.RequestException as e:
+            print(f"Error listing documents and files in collection: {e}")
+            return None
+
+    def upload_file(self, access_token, document_id, file_path):
+        """Upload a file to a document."""
+        try:
+            url = f"{self.base_url}/files"
+            headers = {"Authorization": f"Bearer {access_token}"}
+            with open(file_path, "rb") as file:
+                files = {"file": file}
+                data = {"document_id": document_id}
+                response = requests.post(url, headers=headers, files=files, data=data)
+                response.raise_for_status()
+                return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"Error uploading file: {e}")
+            return None
+
+    def list_files(self, access_token, document_id):
+        """List files attached to a document."""
+        try:
+            url = f"{self.base_url}/files?document_id={document_id}"
+            headers = {"Authorization": f"Bearer {access_token}"}
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"Error listing files: {e}")
+            return None
+
+    def download_file(self, access_token, file_id, save_path):
+        """Download a file by its ID."""
+        try:
+            url = f"{self.base_url}/files/{file_id}"
+            headers = {"Authorization": f"Bearer {access_token}"}
+            response = requests.get(url, headers=headers, stream=True)
+            response.raise_for_status()
+            with open(save_path, "wb") as file:
+                for chunk in response.iter_content(chunk_size=8192):
+                    file.write(chunk)
+            return save_path
+        except requests.exceptions.RequestException as e:
+            print(f"Error downloading file: {e}")
+            return None
 
 
-def main():
-    """
-    Example usage. In a real application, you would:
-    1) Direct the user to `client.get_authorization_url()`
-    2) Capture the authorization code from the redirect URI
-    3) Call `client.exchange_code_for_token(code)`
-    4) Then use the methods below to retrieve folders, documents, etc.
-    """
-
-    # Replace these placeholders with your own values
+# Driver code to demonstrate usage
+if __name__ == "__main__":
+    # Load credentials from environment variables
     CLIENT_ID = os.getenv("MENDELEY_CLIENT_ID")
     CLIENT_SECRET = os.getenv("MENDELEY_SECRET_KEY")
-    REDIRECT_URI = os.getenv("LOCAL_MENDELEY_REDIRECT_URI")
+    REDIRECT_URI = os.getenv("MENDELEY_REDIRECT_URI")
 
-    # Initialize the Mendeley client
-    client = MendeleyClient(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI)
+    # Create a folder for JSON data
+    json_data_folder = os.path.join("mendeley_data", "json_data")
+    os.makedirs(json_data_folder, exist_ok=True)
 
-    # --- STEP 1: Get the authorization URL and guide user to it ---
-    auth_url = client.get_authorization_url()
-    print("Please go to the following URL and authorize the application:")
-    print(auth_url)
+    if not CLIENT_ID or not CLIENT_SECRET or not REDIRECT_URI:
+        raise RuntimeError(
+            "Missing MENDELEY_CLIENT_ID, MENDELEY_SECRET_KEY, or MENDELEY_REDIRECT_URI in environment variables"
+        )
 
-    # After authorization, Mendeley will redirect to your redirect URI with a ?code=<authorization_code>
-    # Suppose you captured that code manually or via a small web server:
-    # auth_code = input("Enter the authorization code: ")
-    #
-    # --- STEP 2: Exchange the code for a token ---
-    # client.exchange_code_for_token(auth_code)
+    manager = MendeleyManager(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI)
 
-    # For demonstration, we won't actually do the full OAuth flow here.
-    # We'll assume you have valid tokens now.
+    # Step 1: Get authorization URL
+    print("Authorization URL:", manager.get_auth_url())
 
-    # --- STEP 3: Use the client methods to interact with the Mendeley API ---
-    # folders = client.get_folders()
-    # for folder in folders:
-    #     print(folder)
+    access_token = input("Enter the authorization access token: ")
 
-    # folder_id = "some_folder_id"
-    # folder_data = client.get_folder_by_id(folder_id)
-    # print(folder_data)
+    # Example usage of methods
+    print("Listing documents...")
+    documents = manager.list_documents(access_token)
+    if not documents:
+        print("No documents found.")
+        exit()
 
-    # documents_in_folder = client.get_documents_in_folder(folder_id)
-    # print(documents_in_folder)
+    print("Listing collections...")
+    collections = manager.list_collections(access_token)
+    if not collections:
+        print("No collections found.")
+        exit()
 
-    # doc_id = "some_document_id"
-    # document_data = client.get_document(doc_id)
-    # print(document_data)
+    # print("Documents:", documents)
+    # print("Collections:", collections)
 
-    # files = client.get_files_for_document(doc_id)
-    # print(files)
+    # Export the documents to a JSON file
+    documents_file_path = os.path.join(json_data_folder, "documents.json")
+    with open(documents_file_path, "w") as f:
+        json.dump(documents, f, indent=2)
+    print(f"Documents exported to {documents_file_path}")
 
+    # Export the collections to a JSON file
+    collections_file_path = os.path.join(json_data_folder, "collections.json")
+    with open(collections_file_path, "w") as f:
+        json.dump(collections, f, indent=2)
+    print(f"Collections exported to {collections_file_path}")
 
-if __name__ == "__main__":
-    main()
+    # Display collections and prompt user to select one
+    print("Available collections:")
+    for idx, collection in enumerate(collections):
+        print(f"{idx + 1}. {collection.get('name')} (ID: {collection.get('id')})")
+
+    collection_index = (
+        int(input("Enter the number of the collection to list documents and files: "))
+        - 1
+    )
+    if collection_index < 0 or collection_index >= len(collections):
+        print("Invalid selection. Exiting.")
+        exit()
+
+    selected_collection = collections[collection_index]
+    collection_id = selected_collection.get("id")
+    collection_name = selected_collection.get("name")
+    slugified_collection_name = slugify(collection_name)
+    print(f"Selected collection: {collection_name} (ID: {collection_id})")
+
+    # Step 4: List documents and files in the selected collection
+    print(f"Listing documents and files in collection: {collection_name}")
+    collection_data = manager.list_documents_and_files_in_collection(
+        access_token, collection_id
+    )
+    if not collection_data:
+        print("No documents or files found in the collection.")
+        exit()
+
+    # Display the documents and files
+    for document in collection_data:
+        print(f"Document: {document['document_title']} (ID: {document['document_id']})")
+        if document["files"]:
+            for file in document["files"]:
+                print(f"  - File: {file.get('file_name')} (ID: {file.get('id')})")
+        else:
+            print("  - No files attached.")
+
+    # Export the collection data to a JSON file
+    collection_data_file_path = os.path.join(
+        json_data_folder, f"{slugified_collection_name}_data.json"
+    )
+    with open(collection_data_file_path, "w") as f:
+        json.dump(collection_data, f, indent=2)
+    print(f"Collection data exported to {collection_data_file_path}")
+
+    # Create a folder for downloaded files
+    download_folder = "mendeley_data"
+    os.makedirs(download_folder, exist_ok=True)
+
+    downloaded_files = []
+    for document in documents:
+        document_id = document.get("id")
+        document_title = document.get("title", "Untitled")
+        print(f"Checking files for document: {document_title} (ID: {document_id})")
+
+        # List files attached to the document
+        files = manager.list_files(access_token, document_id)
+        if files:
+            for file in files:
+                file_id = file.get("id")
+                file_name = file.get("file_name", f"{document_title}.pdf")
+                save_path = os.path.join(download_folder, file_name)
+                print(f"Downloading file: {file_name}")
+                downloaded_file = manager.download_file(
+                    access_token, file_id, save_path
+                )
+                if downloaded_file:
+                    downloaded_files.append(downloaded_file)
+        else:
+            print(f"No files attached to document: {document_title}")
+
+    print(f"Downloaded files: {downloaded_files}")
+
+    print("\nExtract metadata from a PDF file")
+    pdf_file_path = input("Enter the path to the PDF file: ")
+    if os.path.exists(pdf_file_path):
+        metadata = manager.extract_metadata(access_token, pdf_file_path)
+        if metadata:
+            print("Extracted Metadata:")
+            print(json.dumps(metadata, indent=2))
+
+            # Export the metadata to a JSON file
+            metadata_file_name = (
+                os.path.splitext(os.path.basename(pdf_file_path))[0] + "_metadata.json"
+            )
+            metadata_file_path = os.path.join(json_data_folder, metadata_file_name)
+            with open(metadata_file_path, "w") as metadata_file:
+                json.dump(metadata, metadata_file, indent=2)
+            print(f"Metadata exported to {metadata_file_path}")
+        else:
+            print("Failed to extract metadata.")
+    else:
+        print("The specified file does not exist.")

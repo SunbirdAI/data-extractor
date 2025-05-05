@@ -23,13 +23,14 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from gradio_client import Client
 from pydantic import BaseModel, ConfigDict, constr
 
 from docs import description, tags_metadata
 from services.file_service import cleanup_temp_files, download_as_csv
 from services.file_service import new_study_choices as get_study_choices_service
+from services.mendeley_service import MendeleyService
 from services.rag_service import process_multi_input
 from services.zotero_service import get_study_info as get_study_info_service
 from services.zotero_service import process_zotero_library_items
@@ -39,6 +40,12 @@ from utils.zotero_pdf_processory import (
     stuff_summarise_document_bullets,
     update_summary_columns,
 )
+
+# Initialize the Mendeley service
+mendely_client_id = os.getenv("MENDELEY_CLIENT_ID")
+medeley_client_secret = os.getenv("MENDELEY_SECRET_KEY")
+redirect_uri = os.getenv("MENDELEY_REDIRECT_URI")
+service = MendeleyService(mendely_client_id, medeley_client_secret, redirect_uri)
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -694,6 +701,103 @@ def handle_pdf_uploads(
     cleanup_temp_files()
 
     return {"data": response}
+
+
+@router.get("/mendeley_auth", tags=["mendeley"])
+def mendeley_auth():
+    """Redirect the user to the Mendeley authorization URL."""
+    auth_url = service.get_auth_url()
+    # return RedirectResponse(auth_url)
+    return {"auth_url": auth_url}
+
+
+@router.get("/mendeley_callback", tags=["mendeley"])
+def mendeley_callback(request: Request):
+    """Handle the callback from Mendeley and exchange the authorization code for an access token."""
+    auth_code = request.query_params.get("code")
+    if not auth_code:
+        raise HTTPException(status_code=400, detail="Authorization code not provided")
+
+    try:
+        # Exchange the authorization code for an access token
+        access_token = service.manager.get_access_token(auth_code)
+        if not access_token:
+            raise HTTPException(status_code=500, detail="Failed to fetch access token")
+
+        # Store the access token in session or database as needed
+        # For now, we'll just return it
+        return {"access_token": access_token}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error during callback: {e}")
+
+
+@router.get("/mendeley/collections", tags=["mendeley"])
+def list_collections(access_token: str):
+    """Retrieve all collections (folders) in your Mendeley account."""
+    try:
+        collections = service.list_collections(access_token)
+        return {"collections": collections}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error listing collections: {e}")
+
+
+@router.get("/mendeley/documents", tags=["mendeley"])
+def list_documents(access_token: str, collection_id: Optional[str] = None):
+    """Retrieve all documents in your Mendeley library or a specific collection."""
+    try:
+        documents = service.list_documents(access_token, collection_id)
+        return {"documents": documents}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error listing documents: {e}")
+
+
+@router.get("/mendeley/check_files", tags=["mendeley"])
+def check_files(access_token: str, collection_id: str):
+    """Check if documents in a collection have files attached."""
+    try:
+        files_status = service.check_files(access_token, collection_id)
+        return {"files_status": files_status}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error checking files: {e}")
+
+
+@router.post("/mendeley/download_files", tags=["mendeley"])
+def download_files(access_token: str, collection_id: str):
+    """Download attached files for a given collection to a local directory."""
+    try:
+        downloaded_files = service.download_files(access_token, collection_id)
+        return {"downloaded_files": downloaded_files}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error downloading files: {e}")
+
+
+@router.post("/mendeley/extract_metadata", tags=["mendeley"])
+def extract_metadata(access_token: str, pdf_file_path: str):
+    """Extract metadata for a given file."""
+    try:
+        metadata_file_path = service.extract_metadata(access_token, pdf_file_path)
+        if metadata_file_path:
+            # Load the metadata JSON data from the file
+            with open(metadata_file_path, "r") as metadata_file:
+                metadata_json = json.load(metadata_file)
+            return {
+                "metadata_file_path": metadata_file_path,
+                "metadata_json": metadata_json,
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to extract metadata")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error extracting metadata: {e}")
+
+
+@router.post("/mendeley/export_data", tags=["mendeley"])
+def export_data(access_token: str):
+    """Export collections and document data to JSON files."""
+    try:
+        exported_files = service.export_data(access_token)
+        return {"exported_files": exported_files}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error exporting data: {e}")
 
 
 app.include_router(router)
