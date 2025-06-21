@@ -1,0 +1,12 @@
+[deploy]
+bucket = 'cfn-acres-data-extractor-10711387119908011'
+region = 'us-east-1'
+stack_name = 'AcresDataExtractorUbuntuServer'
+vpc_stack_name = 'AcresDataExtractorNetwork'
+
+[parameters]
+VpcStackName = 'AcresDataExtractorNetwork'
+KeyName ='acresdataextractor'
+InstanceType = 'g4dn.xlarge'
+UserDataS3Bucket = 'cfn-acres-data-extractor-10711387119908011'
+UserDataS3Key = 'user_data.tpl'
