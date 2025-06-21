@@ -1,6 +1,6 @@
 # app.py
-import os
 import logging
+import os
 from typing import Any, List, Tuple, Union
 
 import gradio as gr
@@ -12,10 +12,7 @@ from dotenv import load_dotenv
 from config import DATA_DIR, GRADIO_URL, OPENAI_API_KEY, logger
 from interface.gradio_ui import demo
 from utils.db import create_db_and_tables, get_study_files_by_library_id
-from utils.helpers import (
-    add_study_files_to_chromadb,
-    create_directory,
-)
+from utils.helpers import add_study_files_to_chromadb, create_directory
 
 create_directory(DATA_DIR)
 # Configure logging
