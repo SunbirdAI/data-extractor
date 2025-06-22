@@ -1,6 +1,6 @@
 # app.py
-
 import logging
+import os
 from typing import Any, List, Tuple, Union
 
 import gradio as gr
@@ -9,21 +9,18 @@ import pandas as pd
 from cachetools import LRUCache
 from dotenv import load_dotenv
 
-from config import DATA_DIR, GRADIO_URL, OPENAI_API_KEY, STUDY_FILES, UPLOAD_DIR, logger
+from config import DATA_DIR, GRADIO_URL, OPENAI_API_KEY, logger
 from interface.gradio_ui import demo
 from utils.db import create_db_and_tables, get_study_files_by_library_id
-from utils.helpers import (
-    add_study_files_to_chromadb,
-    append_to_study_files,
-    chromadb_client,
-    create_directory,
-)
+from utils.helpers import add_study_files_to_chromadb, create_directory
 
 create_directory(DATA_DIR)
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger.info(f"GRADIO_URL: {GRADIO_URL}")
 load_dotenv()
+
+environment = os.getenv("ENVIRONMENT", "development")
 
 openai.api_key = OPENAI_API_KEY
 
@@ -74,4 +71,14 @@ def new_study_choices():
 
 
 if __name__ == "__main__":
-    demo.launch(share=True, debug=True)
+    if environment == "development":
+        logger.info("Running in development mode")
+        demo.launch(share=True, debug=True)
+    elif environment == "production":
+        logger.info("Running in production mode")
+        demo.launch(
+            server_name="0.0.0.0",
+            server_port=7860,
+            share=False,
+            debug=False,
+        )

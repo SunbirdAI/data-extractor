@@ -1,0 +1,7 @@
+[deploy]
+bucket = 'cfn-acres-data-extractor-10711387119908011'
+region = 'us-east-1'
+stack_name = 'AcresDataExtractorNetwork'
+
+[parameters]
+MyIpCidr = '0.0.0.0/0'

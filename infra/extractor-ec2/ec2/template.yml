@@ -1,0 +1,101 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Launch an Ubuntu EC2 instance in the public subnet with user data to install Ollama and Streamlit.
+
+Parameters:
+  VpcStackName:
+    Type: String
+    Description: Name of the VPC stack to import network resources
+
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: EC2 KeyPair for SSH access
+    Default: acresdataextractor
+
+  InstanceType:
+    Type: String
+    Description: EC2 instance type
+    Default: m4.xlarge
+
+  UbuntuAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Description: SSM parameter path for the Ubuntu AMI
+    Default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+
+Resources:
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      ImageId: !Ref UbuntuAmiId
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          DeviceIndex: 0
+          SubnetId: !ImportValue
+            Fn::Sub: ${VpcStackName}-PublicSubnetId
+          GroupSet:
+            - !ImportValue
+              Fn::Sub: ${VpcStackName}-SecurityGroupId
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeType: gp3
+            VolumeSize: 100
+            DeleteOnTermination: true
+      UserData: !Base64 |
+        #!/usr/bin/env bash
+        set -e
+
+        sudo su
+
+        apt-get update
+        apt install -y git
+        apt install git-lfs -y
+        apt install python3-pip -y
+        git lfs install
+        apt install python3.12-venv -y
+        
+        # Install Ollama
+        curl -fsSL https://ollama.com/install.sh | sh
+        nohup ollama serve > /home/ubuntu/ollama.log 2>&1 &
+        
+        # Clone repository
+        git clone https://github.com/SunbirdAI/acres.git
+        cd acres
+        cp .env.example .env
+        rm -rf study_files.*
+        rm -rf data/*
+        echo '{}' > study_files.json
+        
+        # Install dependencies
+        python3 -m venv env
+        bash -c "source env/bin/activate && pip install --upgrade pip"
+        bash -c "source env/bin/activate && pip install -r requirements.txt"
+        
+        # Start streamlit (run in background)
+        bash -c "cd /home/ubuntu/acres && source env/bin/activate && nohup gradio app.py > /var/log/gradio.log 2>&1 &"
+        bash -c "cd /home/ubuntu/acres && source env/bin/activate && nohup uvicorn api:app --host 0.0.0.0 --port 8000 > /var/log/fastapi-uvicorn.log 2>&1 &"
+
+        
+        # Log completion
+        echo "Setup completed successfully at $(date)" >> /var/log/user-data.log
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-EC2Instance"
+
+Outputs:
+  InstanceId:
+    Description: EC2 Instance ID
+    Value: !Ref EC2Instance
+
+  PublicIp:
+    Description: Public IP of the instance
+    Value: !GetAtt EC2Instance.PublicIp
+
+  AvailabilityZone:
+    Description: Availability Zone of the instance
+    Value: !GetAtt EC2Instance.AvailabilityZone
+
+  PublicDnsName:
+    Description: Public DNS name of the instance
+    Value: !GetAtt EC2Instance.PublicDnsName

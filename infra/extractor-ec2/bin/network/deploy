@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+IAC_ROOT="$(cd "$SCRIPT_DIR/../../" && pwd)"
+
+# Paths to CFN template and config
+CFN_PATH="$IAC_ROOT/network/template.yml"
+CONFIG_PATH="$IAC_ROOT/network/config.toml"
+
+BUCKET=$(cfn-toml key deploy.bucket -t $CONFIG_PATH)
+REGION=$(cfn-toml key deploy.region -t $CONFIG_PATH)
+STACK_NAME=$(cfn-toml key deploy.stack_name -t $CONFIG_PATH)
+PARAMETERS=$(cfn-toml params v2 -t $CONFIG_PATH)
+
+# Default values
+PROFILE=""
+REGION=$(cfn-toml key deploy.region -t $CONFIG_PATH)
+STACK_NAME=$(cfn-toml key deploy.stack_name -t $CONFIG_PATH)
+TEMPLATE_FILE=$CFN_PATH
+S3_BUCKET=$(cfn-toml key deploy.bucket -t $CONFIG_PATH)
+S3_PREFIX="acres-dataextractor-newtwork"
+
+usage() {
+  echo "Usage: $0 -p PROFILE"
+  exit 1
+}
+
+# Parse arguments
+while getopts "p:" opt; do
+  case $opt in
+    p) PROFILE="$OPTARG" ;;  # AWS CLI profile to use
+    *) usage ;;
+  esac
+done
+
+# Validate required args
+if [[ -z "$PROFILE" ]]; then
+  echo "Error: profile (-p) is required"
+  usage
+fi
+if [[ -z "${S3_BUCKET:-}" ]]; then
+  echo "Error: s3 bucket (-b) is required"
+  usage
+fi
+
+# Lint the template
+echo "Linting CloudFormation template: $TEMPLATE_FILE"
+cfn-lint "$TEMPLATE_FILE"
+
+# Deploy using CloudFormation without executing change set
+echo "Deploying stack '$STACK_NAME' to region '$REGION' using profile '$PROFILE'"
+aws cloudformation deploy \
+  --profile "$PROFILE" \
+  --region "$REGION" \
+  --stack-name "$STACK_NAME" \
+  --s3-bucket "$S3_BUCKET" \
+  --s3-prefix "${S3_PREFIX:-networking}" \
+  --template-file "$TEMPLATE_FILE" \
+  --no-execute-changeset \
+  --tags group=network-acres-dataextractor \
+  --parameter-overrides $PARAMETERS \
+  --capabilities CAPABILITY_NAMED_IAM
+
+echo "Deployment command submitted. Review change set in AWS Console or via CLI."
+exit 0

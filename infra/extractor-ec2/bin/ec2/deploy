@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Determine paths
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+IAC_ROOT="$(cd "$SCRIPT_DIR/../../" && pwd)"
+
+# Paths to CFN template and config
+CFN_PATH="$IAC_ROOT/ec2/template.yml"
+CONFIG_PATH="$IAC_ROOT/ec2/config.toml"
+PARAMETERS=$(cfn-toml params v2 -t $CONFIG_PATH)
+
+# Defaults
+PROFILE=""
+REGION=$(cfn-toml key deploy.region -t $CONFIG_PATH)
+STACK_NAME=$(cfn-toml key deploy.stack_name -t $CONFIG_PATH)
+S3_BUCKET=$(cfn-toml key deploy.bucket -t $CONFIG_PATH)
+S3_PREFIX="network-bootcamp-ubuntu-server"
+VPC_STACK_NAME=$(cfn-toml key deploy.vpc_stack_name -t $CONFIG_PATH)
+
+usage() {
+  echo "Usage: $0 -p PROFILE [-r REGION] [-s STACK_NAME] [-v VPC_STACK_NAME]"
+  exit 1
+}
+
+# Parse arguments
+while getopts "p:r:s:v:" opt; do
+  case $opt in
+    p) PROFILE="$OPTARG" ;;      # AWS CLI profile
+    # r) REGION="$OPTARG" ;;       # AWS region override
+    # s) STACK_NAME="$OPTARG" ;;   # CloudFormation stack name override
+    # v) VPC_STACK_NAME="$OPTARG" ;;# VPC stack name override
+    *) usage ;;
+  esac
+done
+
+# Validate required arguments
+if [[ -z "$PROFILE" ]]; then
+  echo "Error: profile (-p) is required"
+  usage
+fi
+
+# Lint template
+echo "Linting CloudFormation template: $CFN_PATH"
+cfn-lint "$CFN_PATH"
+
+# Deploy stack
+echo "Deploying Ubuntu stack '$STACK_NAME' (VPC from '$VPC_STACK_NAME') in region '$REGION' using profile '$PROFILE'"
+aws cloudformation deploy \
+  --profile "$PROFILE" \
+  --region "$REGION" \
+  --stack-name "$STACK_NAME" \
+  --s3-bucket "$S3_BUCKET" \
+  --s3-prefix "${S3_PREFIX:-ubuntu-server}" \
+  --template-file "$CFN_PATH" \
+  --parameter-overrides $PARAMETERS \
+  --tags Project=acres-dataextractor,Environment=production \
+  --no-execute-changeset \
+  --capabilities CAPABILITY_NAMED_IAM
+
+echo "Deployment of stack '$STACK_NAME' complete."
