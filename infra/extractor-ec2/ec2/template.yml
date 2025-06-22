@@ -60,7 +60,7 @@ Resources:
         nohup ollama serve > /home/ubuntu/ollama.log 2>&1 &
         
         # Clone repository
-        git clone https://github.com/SunbirdAI/acres.git
+        git clone https://github.com/SunbirdAI/data-extractor.git acres
         cd acres
         git lfs pull
         cp .env.example .env
